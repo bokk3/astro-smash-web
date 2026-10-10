@@ -209,4 +209,137 @@ export class AudioEngine {
       osc.stop(ctx.currentTime + idx * 0.08 + 1.5);
     });
   }
+
+  /**
+   * Vertical Jump Impulse
+   */
+  public playJump(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(140, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.12);
+
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+  }
+
+  /**
+   * Dodge Roll / Flip Kinetic Burst
+   */
+  public playDodgeFlip(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    // Fast low-to-high whoosh
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(260, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(90, ctx.currentTime + 0.22);
+
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.26);
+  }
+
+  /**
+   * Boost Pad / Mega Canister Pickup
+   */
+  public playBoostPickup(isMega: boolean): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    if (isMega) {
+      // 100% Mega Canister: Lush double chord
+      [440, 660, 880].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.04);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime + idx * 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.04 + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + idx * 0.04);
+        osc.stop(ctx.currentTime + idx * 0.04 + 0.45);
+      });
+    } else {
+      // Small Pad: Quick crystalline chime
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.12);
+    }
+  }
+
+  /**
+   * Supersonic Sonic Boom Crack
+   */
+  public playSonicBoom(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(600, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(45, ctx.currentTime + 0.28);
+
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.32);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  }
+
+  /**
+   * Demolition / Kinetic Obliteration Blast
+   */
+  public playDemolition(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    // Violent explosive crunch
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(180, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(20, ctx.currentTime + 0.7);
+
+    gain.gain.setValueAtTime(0.6, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.75);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.8);
+  }
 }
