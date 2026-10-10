@@ -13,6 +13,20 @@ import { Striker, type StrikerInputs } from './Striker';
 import { Puck } from './Puck';
 import { AudioEngine } from './AudioEngine';
 import { HotasReceiver, type HotasFrame } from './HotasReceiver';
+import { TouchControls } from './TouchControls';
+
+export interface ReplayFrame {
+  puckPos: Vector3;
+  puckVel: Vector3;
+  playerPos: Vector3;
+  playerYaw: number;
+  playerPitch: number;
+  playerRoll: number;
+  aiPos: Vector3;
+  aiYaw: number;
+  aiPitch: number;
+  aiRoll: number;
+}
 
 export class Game {
   public canvas: HTMLCanvasElement;
@@ -20,6 +34,7 @@ export class Game {
   public scene: Scene;
   public audioEngine: AudioEngine;
   public hotasReceiver: HotasReceiver;
+  public touchControls: TouchControls;
 
   // Game Objects
   public arena: Arena;
@@ -39,6 +54,13 @@ export class Game {
   public isGoalFreeze: boolean = false;
   public goalFreezeTimer: number = 0;
 
+  // Goal Replay Buffer & State
+  private replayBuffer: ReplayFrame[] = [];
+  private activeReplayFrames: ReplayFrame[] = [];
+  public isReplaying: boolean = false;
+  private replayPlaybackTimer: number = 0;
+  private replayDuration: number = 3.6;
+
   // Input Tracking
   private keyState: Record<string, boolean> = {};
   private hotasFrame: HotasFrame | null = null;
@@ -56,6 +78,7 @@ export class Game {
   private domGoalBanner: HTMLElement | null = null;
   private domGoalTitle: HTMLElement | null = null;
   private domGoalSubtitle: HTMLElement | null = null;
+  private domReplayBadge: HTMLElement | null = null;
   private domHotasIndicator: HTMLElement | null = null;
   private domHotasLabel: HTMLElement | null = null;
   private domCamLabel: HTMLElement | null = null;
@@ -101,6 +124,11 @@ export class Game {
 
     this.scene.activeCamera = this.chaseCamera;
 
+    // Mobile & Touch Controls
+    this.touchControls = new TouchControls();
+    this.touchControls.init();
+    this.touchControls.onCamToggle(() => this.toggleCamera());
+
     // Cache HUD & Setup Listeners
     this.cacheDomElements();
     this.setupInputs();
@@ -125,6 +153,7 @@ export class Game {
     this.domGoalBanner = document.getElementById('goalBanner');
     this.domGoalTitle = document.getElementById('goalTitle');
     this.domGoalSubtitle = document.getElementById('goalSubtitle');
+    this.domReplayBadge = document.getElementById('replayBadge');
     this.domHotasIndicator = document.getElementById('hotasIndicator');
     this.domHotasLabel = document.getElementById('hotasLabel');
     this.domCamLabel = document.getElementById('camLabel');
@@ -134,6 +163,12 @@ export class Game {
 
   private setupInputs(): void {
     window.addEventListener('keydown', (e) => {
+      // Skip active goal replay on user action
+      if (this.isReplaying && (e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyJ')) {
+        this.skipReplay();
+        return;
+      }
+
       if (!this.keyState[e.code]) {
         if (e.code === 'KeyJ' || e.code === 'Space') {
           this.jumpPressedThisFrame = true;
@@ -155,6 +190,10 @@ export class Game {
     });
 
     window.addEventListener('mousedown', (e) => {
+      if (this.isReplaying) {
+        this.skipReplay();
+        return;
+      }
       if (e.button === 0) {
         this.mousePulseTriggered = true;
       } else if (e.button === 2) {
@@ -255,18 +294,24 @@ export class Game {
   private update(): void {
     const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
 
-    // Goal Freeze state & Slow-Mo
+    // Dynamic Goal Replay Playback
+    if (this.isReplaying) {
+      this.updateReplay(dt);
+      return;
+    }
+
+    // Goal Freeze state & Slow-Mo Impact before Replay
     if (this.isGoalFreeze) {
       this.goalFreezeTimer -= dt;
       if (this.goalFreezeTimer <= 0) {
         this.isGoalFreeze = false;
-        this.resetKickoff();
-        if (this.domGoalBanner) {
-          this.domGoalBanner.className = 'self-center transform -translate-y-8 scale-90 opacity-0 transition-all duration-300 pointer-events-none text-center';
-        }
+        this.startReplay();
       }
       return;
     }
+
+    // Capture telemetry buffer for goal replay
+    this.recordReplayFrame();
 
     // Match Timer Countdown
     this.matchSecondsRemaining = Math.max(0, this.matchSecondsRemaining - dt);
@@ -351,13 +396,17 @@ export class Game {
   }
 
   private getPlayerInputs(): StrikerInputs {
+    const touch = this.touchControls.getInputs();
+
     let throttle = 0;
     let steer = 0;
     let boost = false;
-    let jump = this.jumpPressedThisFrame;
+    let jump = this.jumpPressedThisFrame || touch.jump;
     this.jumpPressedThisFrame = false;
-    let pulse = this.mousePulseTriggered;
+    let pulse = this.mousePulseTriggered || touch.pulse;
     this.mousePulseTriggered = false;
+    let airRollLeft = !!this.keyState['KeyQ'] || touch.airRollLeft;
+    let airRollRight = !!this.keyState['KeyE'] || touch.airRollRight;
 
     // Keyboard bindings
     if (this.keyState['KeyW'] || this.keyState['ArrowUp']) throttle += 1.0;
@@ -367,6 +416,11 @@ export class Game {
 
     // Shift or Space for Turbo Boost
     if (this.keyState['ShiftLeft'] || this.keyState['ShiftRight']) boost = true;
+
+    // Touch controls blending
+    if (Math.abs(touch.throttle) > 0.05) throttle = touch.throttle;
+    if (Math.abs(touch.steer) > 0.05) steer = touch.steer;
+    if (touch.boost) boost = true;
 
     // HOTAS telemetry blending
     if (this.hotasFrame) {
@@ -383,7 +437,7 @@ export class Game {
       if (this.hotasFrame.fire) pulse = true;
     }
 
-    return { throttle, steer, boost, jump, pulse };
+    return { throttle, steer, boost, jump, pulse, airRollLeft, airRollRight };
   }
 
   private getAiInputs(_dt: number): StrikerInputs {
@@ -393,7 +447,7 @@ export class Game {
     let jump = false;
 
     if (this.aiStriker.isDemolished) {
-      return { throttle: 0, steer: 0, boost: false, jump: false, pulse: false };
+      return { throttle: 0, steer: 0, boost: false, jump: false, pulse: false, airRollLeft: false, airRollRight: false };
     }
 
     const ballPos = this.puck.position;
@@ -439,7 +493,7 @@ export class Game {
       boost = true;
     }
 
-    return { throttle, steer, boost, jump, pulse: false };
+    return { throttle, steer, boost, jump, pulse: false, airRollLeft: false, airRollRight: false };
   }
 
   private updateCamera(dt: number): void {
@@ -499,7 +553,7 @@ export class Game {
 
   private onGoal(scoringTeam: 'cyan' | 'magenta'): void {
     this.isGoalFreeze = true;
-    this.goalFreezeTimer = 3.0;
+    this.goalFreezeTimer = 1.2; // 1.2s explosion shockwave, then cinematic replay
 
     if (this.domScoreCyan) this.domScoreCyan.textContent = this.scoreCyan.toString();
     if (this.domScoreMagenta) this.domScoreMagenta.textContent = this.scoreMagenta.toString();
@@ -526,6 +580,104 @@ export class Game {
       }
       this.domGoalBanner.className = 'self-center transform translate-y-0 scale-100 opacity-100 transition-all duration-300 pointer-events-none text-center animate-goal';
     }
+  }
+
+  private recordReplayFrame(): void {
+    this.replayBuffer.push({
+      puckPos: this.puck.position.clone(),
+      puckVel: this.puck.velocity.clone(),
+      playerPos: this.playerStriker.position.clone(),
+      playerYaw: this.playerStriker.yaw,
+      playerPitch: this.playerStriker.pitch,
+      playerRoll: this.playerStriker.roll,
+      aiPos: this.aiStriker.position.clone(),
+      aiYaw: this.aiStriker.yaw,
+      aiPitch: this.aiStriker.pitch,
+      aiRoll: this.aiStriker.roll
+    });
+
+    if (this.replayBuffer.length > 360) {
+      this.replayBuffer.shift();
+    }
+  }
+
+  private startReplay(): void {
+    if (this.replayBuffer.length < 15) {
+      this.resetKickoff();
+      return;
+    }
+
+    this.activeReplayFrames = [...this.replayBuffer];
+    this.isReplaying = true;
+    this.replayPlaybackTimer = 0;
+    this.audioEngine.playGoalWhistle();
+
+    if (this.domReplayBadge) {
+      this.domReplayBadge.classList.remove('hidden');
+    }
+    if (this.domGoalBanner) {
+      this.domGoalBanner.className = 'self-center transform translate-y-0 scale-100 opacity-100 transition-all duration-300 pointer-events-none text-center';
+    }
+  }
+
+  private updateReplay(dt: number): void {
+    this.replayPlaybackTimer += dt * 0.72; // Cinematic Slow-Mo playback rate
+    const progress = this.replayPlaybackTimer / this.replayDuration;
+
+    if (progress >= 1.0) {
+      this.skipReplay();
+      return;
+    }
+
+    const frameIdx = Math.min(
+      Math.floor(progress * (this.activeReplayFrames.length - 1)),
+      this.activeReplayFrames.length - 1
+    );
+    const frame = this.activeReplayFrames[frameIdx];
+
+    // Replay transform positions
+    this.puck.position.copyFrom(frame.puckPos);
+    this.puck.rootMesh.position.copyFrom(frame.puckPos);
+
+    this.playerStriker.position.copyFrom(frame.playerPos);
+    this.playerStriker.rootMesh.position.copyFrom(frame.playerPos);
+    this.playerStriker.rootMesh.rotation.y = frame.playerYaw;
+    this.playerStriker.rootMesh.rotation.x = frame.playerPitch;
+    this.playerStriker.rootMesh.rotation.z = frame.playerRoll;
+
+    this.aiStriker.position.copyFrom(frame.aiPos);
+    this.aiStriker.rootMesh.position.copyFrom(frame.aiPos);
+    this.aiStriker.rootMesh.rotation.y = frame.aiYaw;
+    this.aiStriker.rootMesh.rotation.x = frame.aiPitch;
+    this.aiStriker.rootMesh.rotation.z = frame.aiRoll;
+
+    // Cinematic Replay Camera Orbit
+    const orbitAngle = this.replayPlaybackTimer * 1.25;
+    const orbitRadius = 15;
+    const camOffset = new Vector3(Math.cos(orbitAngle) * orbitRadius, 6.5, Math.sin(orbitAngle) * orbitRadius);
+    const desiredPos = frame.puckPos.add(camOffset);
+
+    this.chaseCamera.position = Vector3.Lerp(this.chaseCamera.position, desiredPos, 9 * dt);
+    this.chaseCamera.setTarget(frame.puckPos.add(new Vector3(0, 0.5, 0)));
+  }
+
+  public skipReplay(): void {
+    if (!this.isReplaying && !this.isGoalFreeze) return;
+
+    this.isReplaying = false;
+    this.isGoalFreeze = false;
+    this.activeReplayFrames = [];
+    this.replayBuffer = [];
+
+    if (this.domReplayBadge) {
+      this.domReplayBadge.classList.add('hidden');
+    }
+
+    if (this.domGoalBanner) {
+      this.domGoalBanner.className = 'self-center transform -translate-y-8 scale-90 opacity-0 transition-all duration-300 pointer-events-none text-center';
+    }
+
+    this.resetKickoff();
   }
 
   private resetKickoff(): void {

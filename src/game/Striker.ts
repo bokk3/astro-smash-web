@@ -15,6 +15,8 @@ export interface StrikerInputs {
   boost: boolean;   // Space / Left-Shift / HOTAS boost
   jump: boolean;    // KeyJ / Right-Click / HOTAS secondary jump
   pulse: boolean;   // KeyF / Left-Click / HOTAS fire
+  airRollLeft: boolean;  // KeyQ / Mobile Roll Left
+  airRollRight: boolean; // KeyE / Mobile Roll Right
 }
 
 export class Striker {
@@ -39,6 +41,11 @@ export class Striker {
   public airTurnSpeed: number = 6.2;     // Rapid air rotation agility
   public linearDrag: number = 0.955;     // High kinetic momentum conservation
   public gravity: number = 34;           // Snappy responsive aerial gravity
+
+  // Wall-Riding & Surface Adhesion
+  public isWallRiding: boolean = false;
+  public wallNormal: Vector3 = new Vector3(0, 0, 0);
+  private airRollSoundTimer: number = 0;
 
   // Jump & Dodge Flip Mechanics
   public isGrounded: boolean = true;
@@ -248,7 +255,21 @@ export class Striker {
     // 2. Jump & Dodge Flip Handling
     if (this.jumpCooldown > 0) this.jumpCooldown -= dt;
 
-    if (this.isGrounded) {
+    if (this.isWallRiding) {
+      this.jumpCount = 0;
+      this.airTime = 0;
+      this.isDodgeFlipping = false;
+
+      // Wall Jump: Launches explosively outward from the wall normal!
+      if (inputs.jump && this.jumpCooldown <= 0) {
+        this.velocity = this.wallNormal.scale(26).add(new Vector3(0, 11, 0));
+        this.isWallRiding = false;
+        this.isGrounded = false;
+        this.jumpCount = 1;
+        this.jumpCooldown = 0.22;
+        this.audioEngine.playJump();
+      }
+    } else if (this.isGrounded) {
       this.jumpCount = 0;
       this.airTime = 0;
       this.isDodgeFlipping = false;
@@ -323,8 +344,38 @@ export class Striker {
       this.audioEngine.playKineticPulse();
     }
 
-    // 5. 3D Orientation & Steering
-    if (this.isGrounded) {
+    // 5. 3D Orientation, Steering & Air-Roll
+    if (this.airRollSoundTimer > 0) this.airRollSoundTimer -= dt;
+
+    if (this.isWallRiding) {
+      // Wall Steering: Rotate heading around wall normal
+      if (Math.abs(inputs.steer) > 0.05) {
+        this.yaw += inputs.steer * this.groundTurnSpeed * dt;
+      }
+
+      // Dynamic surface orientation: align wheels to wall face
+      let targetRoll = 0;
+      let targetPitch = 0;
+      if (this.wallNormal.x > 0.5) {
+        // Left wall (+X normal)
+        targetRoll = -(Math.PI / 2) * Math.cos(this.yaw);
+        targetPitch = (Math.PI / 2) * Math.sin(this.yaw);
+      } else if (this.wallNormal.x < -0.5) {
+        // Right wall (-X normal)
+        targetRoll = (Math.PI / 2) * Math.cos(this.yaw);
+        targetPitch = -(Math.PI / 2) * Math.sin(this.yaw);
+      } else if (this.wallNormal.z > 0.5) {
+        // South wall (+Z normal)
+        targetPitch = -(Math.PI / 2) * Math.cos(this.yaw);
+        targetRoll = -(Math.PI / 2) * Math.sin(this.yaw);
+      } else if (this.wallNormal.z < -0.5) {
+        // North wall (-Z normal)
+        targetPitch = (Math.PI / 2) * Math.cos(this.yaw);
+        targetRoll = (Math.PI / 2) * Math.sin(this.yaw);
+      }
+      this.roll += (targetRoll - this.roll) * 12 * dt;
+      this.pitch += (targetPitch - this.pitch) * 12 * dt;
+    } else if (this.isGrounded) {
       // Ground Steering
       if (Math.abs(inputs.steer) > 0.05) {
         this.yaw += inputs.steer * this.groundTurnSpeed * dt;
@@ -335,13 +386,31 @@ export class Striker {
       const targetPitch = inputs.throttle * 0.12;
       this.pitch += (targetPitch - this.pitch) * 10 * dt;
     } else if (!this.isDodgeFlipping) {
-      // Full 3D Aerial Control (Pitch & Yaw/Roll in air)
+      // Full 3D Aerial Control (Pitch & Yaw in air)
       this.yaw += inputs.steer * this.airTurnSpeed * dt;
       // In air, W tilts nose down, S tilts nose up
       const airPitchRate = 3.6;
       this.pitch += (-inputs.throttle * airPitchRate) * dt;
       this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
-      this.roll += (-inputs.steer * 0.5 - this.roll) * 6 * dt;
+
+      // Dedicated Air-Roll (KeyQ / KeyE or Touch Roll)
+      const airRollRate = 4.8;
+      if (inputs.airRollLeft) {
+        this.roll += airRollRate * dt;
+        if (this.airRollSoundTimer <= 0) {
+          this.audioEngine.playAirRoll();
+          this.airRollSoundTimer = 0.32;
+        }
+      } else if (inputs.airRollRight) {
+        this.roll -= airRollRate * dt;
+        if (this.airRollSoundTimer <= 0) {
+          this.audioEngine.playAirRoll();
+          this.airRollSoundTimer = 0.32;
+        }
+      } else {
+        // Aerodynamic self-stabilization damping when not rolling
+        this.roll += (-inputs.steer * 0.45 - this.roll) * 5 * dt;
+      }
     }
 
     // 6. Thrust & Aerial Boost Acceleration
@@ -350,10 +419,19 @@ export class Striker {
       -Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch)
     );
-
     const forward2D = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
 
-    if (this.isGrounded) {
+    if (this.isWallRiding) {
+      // Wall Surface Drive: project forward vector onto the wall surface plane
+      const fDotN = Vector3.Dot(forward3D, this.wallNormal);
+      const wallTangent = forward3D.subtract(this.wallNormal.scale(fDotN)).normalize();
+      const accel = this.isBoosting ? this.acceleration * 2.6 : this.acceleration;
+
+      if (Math.abs(inputs.throttle) > 0.05) {
+        this.velocity.addInPlace(wallTangent.scale(inputs.throttle * accel * dt));
+      }
+      this.velocity.scaleInPlace(this.linearDrag);
+    } else if (this.isGrounded) {
       // Ground driving
       const accel = this.isBoosting ? this.acceleration * 2.6 : this.acceleration;
 
@@ -397,6 +475,7 @@ export class Striker {
       this.position.y = 1.1;
       this.velocity.y = 0;
       this.isGrounded = true;
+      this.isWallRiding = false;
     }
 
     // Ceiling Collision
@@ -405,24 +484,66 @@ export class Striker {
       this.velocity.y *= -0.5;
     }
 
-    // Side Boundaries
+    // Perimeter Wall Proximity & Kinetic Surface Adhesion
     const halfW = arenaBounds.width / 2 - 2.2;
     const halfL = arenaBounds.length / 2 - 2.2;
 
-    if (this.position.x < -halfW) {
-      this.position.x = -halfW;
-      this.velocity.x *= -0.5;
-    } else if (this.position.x > halfW) {
-      this.position.x = halfW;
-      this.velocity.x *= -0.5;
-    }
+    const nearLeft = this.position.x <= -halfW + 0.65;
+    const nearRight = this.position.x >= halfW - 0.65;
+    const nearBack = this.position.z <= -halfL + 0.65 && (Math.abs(this.position.x) > 11 || this.position.y > 9);
+    const nearFront = this.position.z >= halfL - 0.65 && (Math.abs(this.position.x) > 11 || this.position.y > 9);
 
-    if (this.position.z < -halfL) {
-      this.position.z = -halfL;
-      this.velocity.z *= -0.5;
-    } else if (this.position.z > halfL) {
-      this.position.z = halfL;
-      this.velocity.z *= -0.5;
+    const isNearWall = nearLeft || nearRight || nearBack || nearFront;
+    const speed = this.velocity.length();
+
+    if (isNearWall && (this.position.y > 1.3 || speed > 10)) {
+      this.isWallRiding = true;
+      this.isGrounded = true;
+
+      if (nearLeft) {
+        this.position.x = -halfW;
+        this.wallNormal.set(1, 0, 0);
+        if (this.velocity.x < 0) this.velocity.x = 0;
+        this.velocity.x -= 28 * dt; // Inward adhesion downforce
+      } else if (nearRight) {
+        this.position.x = halfW;
+        this.wallNormal.set(-1, 0, 0);
+        if (this.velocity.x > 0) this.velocity.x = 0;
+        this.velocity.x += 28 * dt; // Inward adhesion downforce
+      } else if (nearBack) {
+        this.position.z = -halfL;
+        this.wallNormal.set(0, 0, 1);
+        if (this.velocity.z < 0) this.velocity.z = 0;
+        this.velocity.z -= 28 * dt; // Inward adhesion downforce
+      } else if (nearFront) {
+        this.position.z = halfL;
+        this.wallNormal.set(0, 0, -1);
+        if (this.velocity.z > 0) this.velocity.z = 0;
+        this.velocity.z += 28 * dt; // Inward adhesion downforce
+      }
+
+      // Adhesion aerodynamic downforce: cancels downward slip proportional to speed
+      const speedAdhesionRatio = Math.min(1.0, speed / 24);
+      this.velocity.y -= this.gravity * (1.0 - speedAdhesionRatio * 0.88) * dt;
+    } else {
+      this.isWallRiding = false;
+
+      // Hard Boundary Clamp for free air
+      if (this.position.x < -halfW) {
+        this.position.x = -halfW;
+        this.velocity.x *= -0.5;
+      } else if (this.position.x > halfW) {
+        this.position.x = halfW;
+        this.velocity.x *= -0.5;
+      }
+
+      if (this.position.z < -halfL) {
+        this.position.z = -halfL;
+        this.velocity.z *= -0.5;
+      } else if (this.position.z > halfL) {
+        this.position.z = halfL;
+        this.velocity.z *= -0.5;
+      }
     }
 
     // 9. Sync Mesh Transforms
@@ -469,6 +590,7 @@ export class Striker {
     this.pitch = 0;
     this.roll = 0;
     this.isGrounded = true;
+    this.isWallRiding = false;
     this.jumpCount = 0;
     this.isDodgeFlipping = false;
     this.boostMeter = 33; // Standard reset boost

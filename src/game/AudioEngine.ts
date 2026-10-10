@@ -342,4 +342,62 @@ export class AudioEngine {
     osc.start();
     osc.stop(ctx.currentTime + 0.8);
   }
+
+  /**
+   * Aerodynamic Air-Roll Vortex Whoosh
+   */
+  public playAirRoll(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.12);
+    osc.frequency.exponentialRampToValueAtTime(90, ctx.currentTime + 0.28);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(450, ctx.currentTime);
+    filter.Q.setValueAtTime(3.0, ctx.currentTime);
+
+    gain.gain.setValueAtTime(0.01, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.16, ctx.currentTime + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.32);
+  }
+
+  /**
+   * Stadium Goal Blast & Siren
+   */
+  public playGoalWhistle(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    // Dual-tone stadium blast whistle (2400Hz + 2800Hz with high tremolo)
+    [2400, 2800].forEach((freq) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.65);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.7);
+    });
+  }
 }
