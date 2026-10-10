@@ -9,6 +9,43 @@ import {
 } from '@babylonjs/core';
 import type { AudioEngine } from './AudioEngine';
 
+export type ChassisType = 'interceptor' | 'vanguard' | 'wraith';
+export type TrailCosmetic = 'ion_cyan' | 'plasma_violet' | 'solar_amber' | 'lightning_blue';
+
+export interface TrailPreset {
+  name: string;
+  color1: Color3;
+  color2: Color3;
+  colorDead: Color3;
+}
+
+export const TRAIL_PRESETS: Record<TrailCosmetic, TrailPreset> = {
+  ion_cyan: {
+    name: 'Ion Cyan',
+    color1: new Color3(0, 0.95, 1),
+    color2: new Color3(0.8, 1, 1),
+    colorDead: new Color3(0, 0.1, 0.25)
+  },
+  plasma_violet: {
+    name: 'Plasma Violet',
+    color1: new Color3(0.9, 0.1, 1),
+    color2: new Color3(0.6, 0.2, 1),
+    colorDead: new Color3(0.15, 0, 0.25)
+  },
+  solar_amber: {
+    name: 'Solar Amber',
+    color1: new Color3(1, 0.55, 0.05),
+    color2: new Color3(1, 0.9, 0.3),
+    colorDead: new Color3(0.25, 0.05, 0)
+  },
+  lightning_blue: {
+    name: 'Hypersonic Lightning',
+    color1: new Color3(0.2, 0.55, 1.0),
+    color2: new Color3(0.9, 0.95, 1.0),
+    colorDead: new Color3(0.05, 0.1, 0.3)
+  }
+};
+
 export interface StrikerInputs {
   throttle: number; // -1 to 1 (W/S or HOTAS)
   steer: number;    // -1 to 1 (A/D or HOTAS Roll/Yaw)
@@ -22,8 +59,14 @@ export interface StrikerInputs {
 export class Striker {
   public scene: Scene;
   public rootMesh: Mesh;
+  public chassisRoot: Mesh | null = null;
   public team: 'cyan' | 'magenta';
   public audioEngine: AudioEngine;
+  public primaryColor: Color3;
+
+  // Active Customization
+  public currentChassis: ChassisType = 'interceptor';
+  public currentTrail: TrailCosmetic = 'ion_cyan';
 
   // Transform & Kinematics
   public position: Vector3;
@@ -84,32 +127,81 @@ export class Striker {
     this.yaw = initialYaw;
     this.audioEngine = audioEngine;
 
-    const primaryColor = team === 'cyan' ? new Color3(0, 0.95, 1) : new Color3(1, 0, 0.95);
+    this.primaryColor = team === 'cyan' ? new Color3(0, 0.95, 1) : new Color3(1, 0, 0.95);
     this.glowMat = new StandardMaterial(`striker_glow_${team}`, scene);
-    this.glowMat.emissiveColor = primaryColor;
-    this.glowMat.diffuseColor = primaryColor.scale(0.8);
+    this.glowMat.emissiveColor = this.primaryColor;
+    this.glowMat.diffuseColor = this.primaryColor.scale(0.8);
 
-    this.rootMesh = this.buildShipMesh(primaryColor);
+    this.rootMesh = new Mesh(`striker_${this.team}`, this.scene);
     this.rootMesh.position = this.position;
     this.rootMesh.rotation.y = this.yaw;
 
-    this.initThrusterFX(primaryColor);
-    this.initSupersonicFX(primaryColor);
+    this.setChassis('interceptor');
+    this.initThrusterFX(this.primaryColor);
+    this.initSupersonicFX(this.primaryColor);
   }
 
-  private buildShipMesh(primaryColor: Color3): Mesh {
-    const parent = new Mesh(`striker_${this.team}`, this.scene);
+  public setChassis(type: ChassisType): void {
+    this.currentChassis = type;
+    if (this.chassisRoot) {
+      this.chassisRoot.dispose(false, true);
+    }
+    this.chassisRoot = new Mesh(`chassis_root_${this.team}_${type}`, this.scene);
+    this.chassisRoot.parent = this.rootMesh;
 
-    const bodyMat = new StandardMaterial(`ship_body_${this.team}`, this.scene);
+    if (type === 'interceptor') {
+      this.buildInterceptorGeometry(this.chassisRoot);
+      this.maxSpeed = 48;
+      this.boostMaxSpeed = 90;
+      this.acceleration = 88;
+      this.airTurnSpeed = 6.2;
+      this.groundTurnSpeed = 5.2;
+    } else if (type === 'vanguard') {
+      this.buildVanguardGeometry(this.chassisRoot);
+      this.maxSpeed = 46;
+      this.boostMaxSpeed = 86;
+      this.acceleration = 84;
+      this.airTurnSpeed = 5.8;
+      this.groundTurnSpeed = 5.4;
+    } else {
+      this.buildWraithGeometry(this.chassisRoot);
+      this.maxSpeed = 50;
+      this.boostMaxSpeed = 88;
+      this.acceleration = 86;
+      this.airTurnSpeed = 6.8;
+      this.groundTurnSpeed = 5.6;
+    }
+  }
+
+  public setTrail(type: TrailCosmetic): void {
+    this.currentTrail = type;
+    const preset = TRAIL_PRESETS[type];
+    if (!preset) return;
+
+    if (this.thrusterParticles) {
+      this.thrusterParticles.color1 = preset.color1.toColor4(0.95);
+      this.thrusterParticles.color2 = preset.color2.toColor4(0.95);
+      this.thrusterParticles.colorDead = preset.colorDead.toColor4(0.0);
+    }
+
+    if (this.supersonicTrails) {
+      this.supersonicTrails.color1 = preset.color2.toColor4(0.9);
+      this.supersonicTrails.color2 = preset.color1.toColor4(0.8);
+      this.supersonicTrails.colorDead = preset.colorDead.toColor4(0.0);
+    }
+  }
+
+  private buildInterceptorGeometry(parent: Mesh): void {
+    const bodyMat = new StandardMaterial(`ship_body_${this.team}_interceptor`, this.scene);
     bodyMat.diffuseColor = new Color3(0.08, 0.09, 0.12);
     bodyMat.specularColor = new Color3(0.8, 0.9, 1.0);
     bodyMat.roughness = 0.3;
 
-    // Aerodynamic Wedge Chassis
+    // 1. Aerodynamic Needle Fuselage
     const fuselage = MeshBuilder.CreateCylinder(`fuselage_${this.team}`, {
-      diameterTop: 0.6,
-      diameterBottom: 2.5,
-      height: 4.6,
+      diameterTop: 0.5,
+      diameterBottom: 2.4,
+      height: 4.8,
       tessellation: 6
     }, this.scene);
     fuselage.rotation.x = Math.PI / 2;
@@ -117,7 +209,7 @@ export class Striker {
     fuselage.material = bodyMat;
     fuselage.parent = parent;
 
-    // Glowing Cockpit Canopy
+    // 2. Streamlined Teardrop Canopy
     const cockpit = MeshBuilder.CreateSphere(`canopy_${this.team}`, {
       diameterX: 1.1,
       diameterY: 0.8,
@@ -128,27 +220,19 @@ export class Striker {
     cockpit.material = this.glowMat;
     cockpit.parent = parent;
 
-    // Swept High-Velocity Wings
+    // 3. Swept Delta Wings
     const wingMat = new StandardMaterial(`wing_${this.team}`, this.scene);
     wingMat.diffuseColor = new Color3(0.12, 0.14, 0.18);
-    wingMat.emissiveColor = primaryColor.scale(0.25);
+    wingMat.emissiveColor = this.primaryColor.scale(0.25);
 
-    const leftWing = MeshBuilder.CreateBox(`left_wing_${this.team}`, {
-      width: 2.4,
-      height: 0.15,
-      depth: 1.9
-    }, this.scene);
+    const leftWing = MeshBuilder.CreateBox(`left_wing_${this.team}`, { width: 2.4, height: 0.15, depth: 1.9 }, this.scene);
     leftWing.position = new Vector3(-1.9, 0.1, -0.6);
     leftWing.rotation.y = -0.3;
     leftWing.rotation.z = 0.1;
     leftWing.material = wingMat;
     leftWing.parent = parent;
 
-    const rightWing = MeshBuilder.CreateBox(`right_wing_${this.team}`, {
-      width: 2.4,
-      height: 0.15,
-      depth: 1.9
-    }, this.scene);
+    const rightWing = MeshBuilder.CreateBox(`right_wing_${this.team}`, { width: 2.4, height: 0.15, depth: 1.9 }, this.scene);
     rightWing.position = new Vector3(1.9, 0.1, -0.6);
     rightWing.rotation.y = 0.3;
     rightWing.rotation.z = -0.1;
@@ -157,7 +241,7 @@ export class Striker {
 
     // Wingtip Beacons
     const beaconMat = new StandardMaterial(`beacon_${this.team}`, this.scene);
-    beaconMat.emissiveColor = primaryColor;
+    beaconMat.emissiveColor = this.primaryColor;
     beaconMat.disableLighting = true;
 
     const leftBeacon = MeshBuilder.CreateSphere(`l_beacon_${this.team}`, { diameter: 0.38 }, this.scene);
@@ -170,9 +254,9 @@ export class Striker {
     rightBeacon.material = beaconMat;
     rightBeacon.parent = parent;
 
-    // Twin High-Thrust Exhaust Rings
+    // Twin Exhaust Rings
     const exhaustMat = new StandardMaterial(`exhaust_${this.team}`, this.scene);
-    exhaustMat.emissiveColor = primaryColor;
+    exhaustMat.emissiveColor = this.primaryColor;
     exhaustMat.disableLighting = true;
 
     const exhaustL = MeshBuilder.CreateTorus(`exhaust_l_${this.team}`, { diameter: 0.75, thickness: 0.18 }, this.scene);
@@ -186,8 +270,187 @@ export class Striker {
     exhaustR.rotation.x = Math.PI / 2;
     exhaustR.material = exhaustMat;
     exhaustR.parent = parent;
+  }
 
-    return parent;
+  private buildVanguardGeometry(parent: Mesh): void {
+    const armorMat = new StandardMaterial(`armor_body_${this.team}_vanguard`, this.scene);
+    armorMat.diffuseColor = new Color3(0.07, 0.08, 0.10);
+    armorMat.specularColor = new Color3(0.9, 0.95, 1.0);
+    armorMat.roughness = 0.22;
+
+    const heavyMat = new StandardMaterial(`heavy_plate_${this.team}`, this.scene);
+    heavyMat.diffuseColor = new Color3(0.14, 0.16, 0.20);
+    heavyMat.emissiveColor = this.primaryColor.scale(0.3);
+
+    // 1. Chiseled Broad-Brawler Main Hull
+    const mainHull = MeshBuilder.CreateBox(`vanguard_hull_${this.team}`, {
+      width: 2.8,
+      height: 1.1,
+      depth: 4.4
+    }, this.scene);
+    mainHull.position = new Vector3(0, 0.2, 0);
+    mainHull.material = armorMat;
+    mainHull.parent = parent;
+
+    // 2. Heavy Front Bumper Wedge (Massive Surface for aerial spikes and boomers)
+    const frontBumper = MeshBuilder.CreateBox(`vanguard_bumper_${this.team}`, {
+      width: 3.1,
+      height: 0.48,
+      depth: 0.8
+    }, this.scene);
+    frontBumper.position = new Vector3(0, -0.1, 2.2);
+    frontBumper.material = heavyMat;
+    frontBumper.parent = parent;
+
+    // 3. Angled Reinforced Cockpit Visor
+    const visor = MeshBuilder.CreateBox(`vanguard_visor_${this.team}`, {
+      width: 1.4,
+      height: 0.65,
+      depth: 1.6
+    }, this.scene);
+    visor.position = new Vector3(0, 0.75, 0.4);
+    visor.rotation.x = -0.22;
+    visor.material = this.glowMat;
+    visor.parent = parent;
+
+    // 4. Side Engine Sponsons / Ram-Air Pods
+    [-1.65, 1.65].forEach((xSide, idx) => {
+      const sponson = MeshBuilder.CreateBox(`vanguard_sponson_${idx}_${this.team}`, {
+        width: 0.65,
+        height: 0.85,
+        depth: 3.2
+      }, this.scene);
+      sponson.position = new Vector3(xSide, 0.15, -0.4);
+      sponson.material = armorMat;
+      sponson.parent = parent;
+
+      const sponsonGlow = MeshBuilder.CreatePlane(`sponson_glow_${idx}_${this.team}`, { width: 0.5, height: 0.6 }, this.scene);
+      sponsonGlow.position = new Vector3(xSide, 0.15, 1.25);
+      sponsonGlow.material = this.glowMat;
+      sponsonGlow.parent = parent;
+    });
+
+    // 5. High-Downforce Rear Aerofoil Spoiler
+    const spoiler = MeshBuilder.CreateBox(`vanguard_spoiler_${this.team}`, {
+      width: 3.4,
+      height: 0.14,
+      depth: 0.75
+    }, this.scene);
+    spoiler.position = new Vector3(0, 1.05, -2.0);
+    spoiler.material = heavyMat;
+    spoiler.parent = parent;
+
+    // Spoiler Struts
+    [-1.1, 1.1].forEach((strutX, idx) => {
+      const strut = MeshBuilder.CreateBox(`spoiler_strut_${idx}_${this.team}`, {
+        width: 0.1,
+        height: 0.55,
+        depth: 0.3
+      }, this.scene);
+      strut.position = new Vector3(strutX, 0.78, -2.0);
+      strut.material = armorMat;
+      strut.parent = parent;
+    });
+
+    // 6. Dual Heavy Rectangular Vector Exhausts
+    [-0.85, 0.85].forEach((xExhaust, idx) => {
+      const exhaust = MeshBuilder.CreateBox(`vanguard_exhaust_${idx}_${this.team}`, {
+        width: 0.85,
+        height: 0.55,
+        depth: 0.4
+      }, this.scene);
+      exhaust.position = new Vector3(xExhaust, 0.15, -2.3);
+      exhaust.material = this.glowMat;
+      exhaust.parent = parent;
+    });
+  }
+
+  private buildWraithGeometry(parent: Mesh): void {
+    const stealthMat = new StandardMaterial(`stealth_body_${this.team}_wraith`, this.scene);
+    stealthMat.diffuseColor = new Color3(0.06, 0.07, 0.09);
+    stealthMat.specularColor = new Color3(1.0, 0.8, 1.0);
+    stealthMat.roughness = 0.25;
+
+    const accentMat = new StandardMaterial(`wraith_accent_${this.team}`, this.scene);
+    accentMat.diffuseColor = new Color3(0.12, 0.13, 0.18);
+    accentMat.emissiveColor = this.primaryColor.scale(0.35);
+
+    // 1. Split Twin-Pontoon Hulls
+    [-1.25, 1.25].forEach((xSide, idx) => {
+      const hull = MeshBuilder.CreateCylinder(`wraith_hull_${idx}_${this.team}`, {
+        diameterTop: 0.4,
+        diameterBottom: 1.4,
+        height: 4.8,
+        tessellation: 5
+      }, this.scene);
+      hull.rotation.x = Math.PI / 2;
+      hull.rotation.y = idx === 0 ? -0.06 : 0.06;
+      hull.position = new Vector3(xSide, 0.15, 0);
+      hull.material = stealthMat;
+      hull.parent = parent;
+
+      // Pontoon Tip Spikes
+      const spike = MeshBuilder.CreateCylinder(`wraith_spike_${idx}_${this.team}`, {
+        diameterTop: 0.05,
+        diameterBottom: 0.42,
+        height: 0.8
+      }, this.scene);
+      spike.rotation.x = Math.PI / 2;
+      spike.position = new Vector3(xSide, 0.15, 2.7);
+      spike.material = this.glowMat;
+      spike.parent = parent;
+    });
+
+    // 2. Central Tunnel Bridge Deck
+    const centerDeck = MeshBuilder.CreateBox(`wraith_bridge_${this.team}`, {
+      width: 1.6,
+      height: 0.35,
+      depth: 3.2
+    }, this.scene);
+    centerDeck.position = new Vector3(0, 0.2, -0.2);
+    centerDeck.material = accentMat;
+    centerDeck.parent = parent;
+
+    // 3. Recessed Stealth Sensor Cockpit
+    const cockpit = MeshBuilder.CreateSphere(`wraith_canopy_${this.team}`, {
+      diameterX: 0.95,
+      diameterY: 0.55,
+      diameterZ: 1.8,
+      segments: 16
+    }, this.scene);
+    cockpit.position = new Vector3(0, 0.42, 0.1);
+    cockpit.material = this.glowMat;
+    cockpit.parent = parent;
+
+    // 4. Forward-Swept Canard Fins
+    [-1.8, 1.8].forEach((xSide, idx) => {
+      const canard = MeshBuilder.CreateBox(`wraith_canard_${idx}_${this.team}`, {
+        width: 1.6,
+        height: 0.1,
+        depth: 0.9
+      }, this.scene);
+      canard.position = new Vector3(xSide, 0.22, 0.8);
+      canard.rotation.y = idx === 0 ? 0.35 : -0.35;
+      canard.material = accentMat;
+      canard.parent = parent;
+    });
+
+    // 5. Quad Exhaust Thruster Cluster
+    [
+      { x: -1.25, y: 0.3 },
+      { x: -1.25, y: -0.05 },
+      { x: 1.25, y: 0.3 },
+      { x: 1.25, y: -0.05 }
+    ].forEach((pos, idx) => {
+      const ring = MeshBuilder.CreateTorus(`wraith_exhaust_${idx}_${this.team}`, {
+        diameter: 0.55,
+        thickness: 0.12
+      }, this.scene);
+      ring.position = new Vector3(pos.x, pos.y, -2.35);
+      ring.rotation.x = Math.PI / 2;
+      ring.material = this.glowMat;
+      ring.parent = parent;
+    });
   }
 
   private initThrusterFX(primaryColor: Color3): void {

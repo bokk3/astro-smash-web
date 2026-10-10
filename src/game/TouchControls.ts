@@ -38,8 +38,9 @@ export class TouchControls {
   private isRollingLeft: boolean = false;
   private isRollingRight: boolean = false;
 
-  // Callback for camera
+  // Callback for camera & garage
   private camToggleCallback: (() => void) | null = null;
+  private garageToggleCallback: (() => void) | null = null;
 
   // DOM Elements
   private overlay: HTMLElement | null = null;
@@ -51,6 +52,7 @@ export class TouchControls {
   private rollLBtn: HTMLElement | null = null;
   private rollRBtn: HTMLElement | null = null;
   private camBtn: HTMLElement | null = null;
+  private garageBtn: HTMLElement | null = null;
 
   constructor() {
     this.isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 1024;
@@ -70,6 +72,10 @@ export class TouchControls {
 
   public onCamToggle(cb: () => void): void {
     this.camToggleCallback = cb;
+  }
+
+  public onGarageToggle(cb: () => void): void {
+    this.garageToggleCallback = cb;
   }
 
   public getActive(): boolean {
@@ -113,15 +119,18 @@ export class TouchControls {
 
       <!-- Right Action Cluster -->
       <div class="absolute bottom-6 right-6 pointer-events-auto flex flex-col items-end gap-3">
-        <!-- Air Roll Left & Right Row -->
+        <!-- Air Roll Left & Right Row + Auxiliary Settings -->
         <div class="flex items-center gap-2 mb-1">
-          <button id="touchRollLBtn" class="w-12 h-12 rounded-xl bg-black/60 border border-slate-700 text-cyan-400 text-xs font-mono font-bold active:scale-95 active:bg-cyan-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
+          <button id="touchGarageBtn" class="w-11 h-11 rounded-xl bg-black/70 border border-fuchsia-500/50 text-fuchsia-400 text-xs font-mono font-bold active:scale-95 active:bg-fuchsia-950/80 backdrop-blur-md shadow-md flex items-center justify-center" title="Garage Customization">
+            🛠️
+          </button>
+          <button id="touchRollLBtn" class="w-11 h-11 rounded-xl bg-black/60 border border-slate-700 text-cyan-400 text-xs font-mono font-bold active:scale-95 active:bg-cyan-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
             ↶ Q
           </button>
-          <button id="touchRollRBtn" class="w-12 h-12 rounded-xl bg-black/60 border border-slate-700 text-cyan-400 text-xs font-mono font-bold active:scale-95 active:bg-cyan-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
+          <button id="touchRollRBtn" class="w-11 h-11 rounded-xl bg-black/60 border border-slate-700 text-cyan-400 text-xs font-mono font-bold active:scale-95 active:bg-cyan-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
             E ↷
           </button>
-          <button id="touchCamBtn" class="w-12 h-12 rounded-xl bg-black/60 border border-slate-700 text-amber-400 text-xs font-mono font-bold active:scale-95 active:bg-amber-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
+          <button id="touchCamBtn" class="w-11 h-11 rounded-xl bg-black/60 border border-slate-700 text-amber-400 text-xs font-mono font-bold active:scale-95 active:bg-amber-950/80 backdrop-blur-md shadow-md flex items-center justify-center">
             CAM
           </button>
         </div>
@@ -160,6 +169,7 @@ export class TouchControls {
     this.rollLBtn = document.getElementById('touchRollLBtn');
     this.rollRBtn = document.getElementById('touchRollRBtn');
     this.camBtn = document.getElementById('touchCamBtn');
+    this.garageBtn = document.getElementById('touchGarageBtn');
   }
 
   private bindEvents(): void {
@@ -241,6 +251,15 @@ export class TouchControls {
         e.preventDefault();
         this.triggerHaptic(15);
         if (this.camToggleCallback) this.camToggleCallback();
+      }, { passive: false });
+    }
+
+    // Garage button
+    if (this.garageBtn) {
+      this.garageBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        this.triggerHaptic(18);
+        if (this.garageToggleCallback) this.garageToggleCallback();
       }, { passive: false });
     }
   }

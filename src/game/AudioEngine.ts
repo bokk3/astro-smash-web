@@ -400,4 +400,31 @@ export class AudioEngine {
       osc.stop(ctx.currentTime + 0.7);
     });
   }
+
+  /**
+   * Garage Chassis / Cosmetic Equip Hydraulic Click & Plasma Charge
+   */
+  public playGarageEquip(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(280, t);
+    osc.frequency.exponentialRampToValueAtTime(740, t + 0.08);
+    osc.frequency.exponentialRampToValueAtTime(1180, t + 0.16);
+
+    gain.gain.setValueAtTime(0.18, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.24);
+  }
 }
+

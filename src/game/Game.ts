@@ -9,7 +9,7 @@ import {
   ArcRotateCamera
 } from '@babylonjs/core';
 import { Arena } from './Arena';
-import { Striker, type StrikerInputs } from './Striker';
+import { Striker, type StrikerInputs, type ChassisType, type TrailCosmetic } from './Striker';
 import { Puck } from './Puck';
 import { AudioEngine } from './AudioEngine';
 import { HotasReceiver, type HotasFrame } from './HotasReceiver';
@@ -85,6 +85,14 @@ export class Game {
   private domSpeedLines: HTMLElement | null = null;
   private domSpeedTier: HTMLElement | null = null;
 
+  // Garage Customization DOM Elements
+  private domGarageModal: HTMLElement | null = null;
+  private domGarageBtn: HTMLElement | null = null;
+  private domCloseGarageBtn: HTMLElement | null = null;
+  private domConfirmGarageBtn: HTMLElement | null = null;
+  private domActiveChassisBadge: HTMLElement | null = null;
+  private domActiveTrailBadge: HTMLElement | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.engine = new Engine(canvas, true, {
@@ -128,10 +136,12 @@ export class Game {
     this.touchControls = new TouchControls();
     this.touchControls.init();
     this.touchControls.onCamToggle(() => this.toggleCamera());
+    this.touchControls.onGarageToggle(() => this.toggleGarageModal());
 
     // Cache HUD & Setup Listeners
     this.cacheDomElements();
     this.setupInputs();
+    this.setupGarageUI();
     this.setupHotasHooks();
     this.setupResize();
 
@@ -159,6 +169,14 @@ export class Game {
     this.domCamLabel = document.getElementById('camLabel');
     this.domSpeedLines = document.getElementById('speedLinesOverlay');
     this.domSpeedTier = document.getElementById('speedTier');
+
+    // Garage
+    this.domGarageModal = document.getElementById('garageModal');
+    this.domGarageBtn = document.getElementById('garageBtn');
+    this.domCloseGarageBtn = document.getElementById('closeGarageBtn');
+    this.domConfirmGarageBtn = document.getElementById('confirmGarageBtn');
+    this.domActiveChassisBadge = document.getElementById('activeChassisBadge');
+    this.domActiveTrailBadge = document.getElementById('activeTrailBadge');
   }
 
   private setupInputs(): void {
@@ -175,6 +193,11 @@ export class Game {
         }
       }
       this.keyState[e.code] = true;
+
+      // Toggle Garage Customization (H or G)
+      if (e.code === 'KeyH' || e.code === 'KeyG') {
+        this.toggleGarageModal();
+      }
 
       // Camera toggle: C or B toggles Ball Cam / Chase Cam
       if (e.code === 'KeyC' || e.code === 'KeyB') {
@@ -239,6 +262,90 @@ export class Game {
     });
     modalDoneBtn?.addEventListener('click', () => {
       hotasModal?.classList.add('hidden');
+    });
+  }
+
+  public toggleGarageModal(forceOpen?: boolean): void {
+    if (!this.domGarageModal) return;
+    const shouldOpen = forceOpen !== undefined ? forceOpen : this.domGarageModal.classList.contains('hidden');
+    if (shouldOpen) {
+      this.domGarageModal.classList.remove('hidden');
+    } else {
+      this.domGarageModal.classList.add('hidden');
+    }
+  }
+
+  private setupGarageUI(): void {
+    this.domGarageBtn?.addEventListener('click', () => {
+      this.toggleGarageModal();
+    });
+    this.domCloseGarageBtn?.addEventListener('click', () => {
+      this.toggleGarageModal(false);
+    });
+    this.domConfirmGarageBtn?.addEventListener('click', () => {
+      this.toggleGarageModal(false);
+    });
+
+    // Chassis Variant Selectors
+    const chassisConfigs: { id: string; type: ChassisType; name: string }[] = [
+      { id: 'chassisBtnInterceptor', type: 'interceptor', name: 'INTERCEPTOR ACTIVE' },
+      { id: 'chassisBtnVanguard', type: 'vanguard', name: 'VANGUARD ACTIVE' },
+      { id: 'chassisBtnWraith', type: 'wraith', name: 'WRAITH ACTIVE' }
+    ];
+
+    chassisConfigs.forEach(cfg => {
+      const btn = document.getElementById(cfg.id);
+      btn?.addEventListener('click', () => {
+        this.playerStriker.setChassis(cfg.type);
+        this.audioEngine.playGarageEquip();
+
+        if (this.domActiveChassisBadge) {
+          this.domActiveChassisBadge.textContent = cfg.name;
+        }
+
+        // Highlight selected chassis card
+        chassisConfigs.forEach(c => {
+          const b = document.getElementById(c.id);
+          if (b) {
+            if (c.type === cfg.type) {
+              b.className = 'chassis-option-btn p-3 rounded-2xl bg-black/60 border-2 border-cyan-400 text-left transition-all shadow-[0_0_20px_rgba(0,243,255,0.3)] cursor-pointer';
+            } else {
+              b.className = 'chassis-option-btn p-3 rounded-2xl bg-black/40 border-2 border-slate-800 hover:border-slate-700 text-left transition-all cursor-pointer';
+            }
+          }
+        });
+      });
+    });
+
+    // Trail Cosmetic Selectors
+    const trailConfigs: { id: string; type: TrailCosmetic; name: string; border: string }[] = [
+      { id: 'trailBtnCyan', type: 'ion_cyan', name: 'ION CYAN ACTIVE', border: 'border-cyan-400' },
+      { id: 'trailBtnViolet', type: 'plasma_violet', name: 'PLASMA VIOLET ACTIVE', border: 'border-fuchsia-400' },
+      { id: 'trailBtnAmber', type: 'solar_amber', name: 'SOLAR AMBER ACTIVE', border: 'border-amber-400' },
+      { id: 'trailBtnLightning', type: 'lightning_blue', name: 'LIGHTNING ACTIVE', border: 'border-blue-400' }
+    ];
+
+    trailConfigs.forEach(cfg => {
+      const btn = document.getElementById(cfg.id);
+      btn?.addEventListener('click', () => {
+        this.playerStriker.setTrail(cfg.type);
+        this.audioEngine.playGarageEquip();
+
+        if (this.domActiveTrailBadge) {
+          this.domActiveTrailBadge.textContent = cfg.name;
+        }
+
+        trailConfigs.forEach(t => {
+          const b = document.getElementById(t.id);
+          if (b) {
+            if (t.type === cfg.type) {
+              b.className = `trail-option-btn p-2.5 rounded-xl bg-slate-900 border-2 ${t.border} text-left transition-all flex items-center gap-2 cursor-pointer shadow-lg`;
+            } else {
+              b.className = 'trail-option-btn p-2.5 rounded-xl bg-black/40 border-2 border-slate-800 hover:border-slate-700 text-left transition-all flex items-center gap-2 cursor-pointer';
+            }
+          }
+        });
+      });
     });
   }
 
