@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #08080a;
+  font-family: 'Chakra Petch', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#renderCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  outline: none;
+}
+
+/* Glassmorphism panel styles */
+.hud-glass {
+  background: rgba(10, 10, 14, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.neon-glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 243, 255, 0.35);
+}
+
+.neon-glow-magenta {
+  box-shadow: 0 0 20px rgba(255, 0, 255, 0.35);
+}
+
+@keyframes goal-pulse {
+  0% { transform: translateY(-30px) scale(0.85); opacity: 0; }
+  20% { transform: translateY(0) scale(1.1); opacity: 1; }
+  35% { transform: translateY(0) scale(1); opacity: 1; }
+  85% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(20px) scale(0.95); opacity: 0; }
+}
+
+.animate-goal {
+  animation: goal-pulse 2.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
