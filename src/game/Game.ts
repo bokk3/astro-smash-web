@@ -59,6 +59,8 @@ export class Game {
   private domHotasIndicator: HTMLElement | null = null;
   private domHotasLabel: HTMLElement | null = null;
   private domCamLabel: HTMLElement | null = null;
+  private domSpeedLines: HTMLElement | null = null;
+  private domSpeedTier: HTMLElement | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -126,6 +128,8 @@ export class Game {
     this.domHotasIndicator = document.getElementById('hotasIndicator');
     this.domHotasLabel = document.getElementById('hotasLabel');
     this.domCamLabel = document.getElementById('camLabel');
+    this.domSpeedLines = document.getElementById('speedLinesOverlay');
+    this.domSpeedTier = document.getElementById('speedTier');
   }
 
   private setupInputs(): void {
@@ -445,6 +449,17 @@ export class Game {
     const shipYaw = this.playerStriker.yaw;
     const ballPos = this.puck.position;
 
+    // Dynamic Velocity Warp & Camera Pullback
+    const currentSpeed = this.playerStriker.velocity.length();
+    const speedRatio = Math.min(1.0, currentSpeed / 85);
+
+    // Dynamic FOV: 0.82 rad (~47 deg) expanding to 1.18 rad (~68 deg) at hypersonic afterburner
+    const targetFov = 0.82 + speedRatio * 0.36;
+    this.chaseCamera.fov = this.chaseCamera.fov + (targetFov - this.chaseCamera.fov) * Math.min(1.0, 10 * dt);
+
+    const pullDist = 14.2 + speedRatio * 5.8;
+    const camHeight = 6.2 + speedRatio * 1.6;
+
     if (this.activeCamMode === 'ball') {
       // Dynamic Ball Cam: Positioned behind craft, dynamically aiming at the ball
       const toBall = ballPos.subtract(shipPos);
@@ -455,7 +470,7 @@ export class Game {
 
       // Blend between ship heading and ball angle for natural feel
       const camDir = Vector3.Lerp(behindVec, ballNorm.scale(-1), 0.55).normalize();
-      const camOffset = camDir.scale(15).add(new Vector3(0, 6.8, 0));
+      const camOffset = camDir.scale(pullDist).add(new Vector3(0, camHeight, 0));
       const desiredPos = shipPos.add(camOffset);
 
       this.chaseCamera.position = Vector3.Lerp(this.chaseCamera.position, desiredPos, 11 * dt);
@@ -465,12 +480,20 @@ export class Game {
       this.chaseCamera.setTarget(targetFocus);
     } else {
       // Standard Chase Cam
-      const camOffset = new Vector3(-Math.sin(shipYaw) * 14.5, 6.2, -Math.cos(shipYaw) * 14.5);
+      const camOffset = new Vector3(-Math.sin(shipYaw) * pullDist, camHeight, -Math.cos(shipYaw) * pullDist);
       const desiredPos = shipPos.add(camOffset);
       this.chaseCamera.position = Vector3.Lerp(this.chaseCamera.position, desiredPos, 10 * dt);
 
       const lookAt = shipPos.add(new Vector3(Math.sin(shipYaw) * 8, 1.2, Math.cos(shipYaw) * 8));
       this.chaseCamera.setTarget(lookAt);
+    }
+
+    // Hypersonic / Supersonic Airframe Micro-vibration
+    if (this.playerStriker.isSupersonic) {
+      const shakeIntensity = 0.12 * speedRatio;
+      this.chaseCamera.position.x += (Math.random() - 0.5) * shakeIntensity;
+      this.chaseCamera.position.y += (Math.random() - 0.5) * shakeIntensity * 0.7;
+      this.chaseCamera.position.z += (Math.random() - 0.5) * shakeIntensity;
     }
   }
 
@@ -512,14 +535,38 @@ export class Game {
   }
 
   private updateHud(): void {
+    const speed = this.playerStriker.getSpeedKmH();
+
     if (this.domSpeedValue) {
-      const speed = this.playerStriker.getSpeedKmH();
       this.domSpeedValue.textContent = speed.toString().padStart(3, '0');
-      if (this.playerStriker.isSupersonic) {
+      if (speed >= 210) {
+        // Hypersonic Tier (>210 km/h)
+        this.domSpeedValue.className = 'text-3xl font-black font-mono text-[#FFE600] leading-none animate-pulse drop-shadow-[0_0_20px_#FFE600]';
+      } else if (this.playerStriker.isSupersonic) {
+        // Supersonic Tier
         this.domSpeedValue.className = 'text-3xl font-black font-mono text-[#00F3FF] leading-none animate-pulse drop-shadow-[0_0_15px_#00F3FF]';
       } else {
         this.domSpeedValue.className = 'text-3xl font-black font-mono text-white leading-none';
       }
+    }
+
+    if (this.domSpeedTier) {
+      if (speed >= 210) {
+        this.domSpeedTier.textContent = 'HYPERSONIC';
+        this.domSpeedTier.className = 'text-[9px] font-mono font-bold text-amber-300 tracking-wider animate-pulse';
+      } else if (this.playerStriker.isSupersonic) {
+        this.domSpeedTier.textContent = 'SUPERSONIC';
+        this.domSpeedTier.className = 'text-[9px] font-mono font-bold text-[#00F3FF] tracking-wider';
+      } else {
+        this.domSpeedTier.textContent = 'SUB-SONIC';
+        this.domSpeedTier.className = 'text-[9px] font-mono text-slate-500 tracking-wider';
+      }
+    }
+
+    if (this.domSpeedLines) {
+      // Radial speed streak overlay: fades in from 140 km/h and peaks at 280 km/h
+      const linesAlpha = Math.max(0, Math.min(1.0, (speed - 140) / 130));
+      this.domSpeedLines.style.opacity = linesAlpha.toFixed(2);
     }
 
     if (this.domBoostPercent && this.domBoostBar) {

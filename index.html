@@ -15,6 +15,9 @@
     <!-- Babylon.js Render Canvas -->
     <canvas id="renderCanvas" class="w-full h-full block touch-none outline-none"></canvas>
 
+    <!-- Hypersonic Radial Speed Lines Overlay -->
+    <div id="speedLinesOverlay" class="absolute inset-0 pointer-events-none opacity-0 transition-opacity duration-150 speed-lines-canvas"></div>
+
     <!-- Cybernetic HUD Overlay -->
     <div id="hudOverlay" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6">
       
@@ -110,7 +113,10 @@
         <div class="flex items-center gap-6 bg-black/85 backdrop-blur-lg px-6 py-3 rounded-2xl border border-slate-800 shadow-[0_4px_30px_rgba(0,0,0,0.8)]">
           <!-- Speedometer -->
           <div class="flex flex-col items-center">
-            <span class="text-[9px] uppercase font-mono tracking-widest text-slate-500">Velocity</span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[9px] uppercase font-mono tracking-widest text-slate-500">Velocity</span>
+              <span id="speedTier" class="text-[9px] font-mono text-slate-500 tracking-wider">SUB-SONIC</span>
+            </div>
             <div class="flex items-baseline gap-1">
               <span id="speedValue" class="text-3xl font-black font-mono text-white leading-none">000</span>
               <span class="text-[10px] font-mono text-cyan-400 font-bold">KM/H</span>

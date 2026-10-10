@@ -18,10 +18,10 @@ export class Puck {
   public radius: number = 1.4;
   public position: Vector3;
   public velocity: Vector3 = new Vector3(0, 0, 0);
-  public maxSpeed: number = 65;
-  public friction: number = 0.995;
-  public restitution: number = 0.82; // Bounciness
-  public gravity: number = 16.5;
+  public maxSpeed: number = 130; // ~468 KM/H ceiling for hypersonic boomer pinches
+  public friction: number = 0.996;
+  public restitution: number = 0.92; // High kinetic elasticity
+  public gravity: number = 18.5;
 
   // Ground Indicator Reticle
   private groundReticle: Mesh;
@@ -173,10 +173,10 @@ export class Puck {
 
         if (normalSpeed < 0) {
           // Striker contacted ball
-          let impulseMult = 1.45;
-          // Massive boomer shot if contacting during a dodge flip!
+          let impulseMult = 1.7;
+          // Extreme Boomer Shot if contacting during a supersonic dodge flip!
           if (striker.isDodgeFlipping) {
-            impulseMult = 2.1;
+            impulseMult = 2.85;
           }
 
           const impulse = normal.scale(-normalSpeed * (1 + this.restitution) * impulseMult);
@@ -185,26 +185,26 @@ export class Puck {
           // Add Striker forward momentum
           const forwardVec = new Vector3(
             Math.sin(striker.yaw) * Math.cos(striker.pitch),
-            -Math.sin(striker.pitch) + 0.35, // Lift ball upward
+            -Math.sin(striker.pitch) + 0.38, // Lift ball upward
             Math.cos(striker.yaw) * Math.cos(striker.pitch)
           );
 
-          const forwardPush = forwardVec.scale(striker.isBoosting ? 32 : 16);
+          const forwardPush = forwardVec.scale(striker.isBoosting ? 58 : 28);
           this.velocity.addInPlace(forwardPush);
 
           // Sound effect
-          this.audioEngine.playBallHit(this.velocity.length() / 20);
+          this.audioEngine.playBallHit(Math.min(3.0, this.velocity.length() / 25));
         }
 
         // Kinetic Pulse Shockwave
         if (striker.isPulseActive) {
           const pulseDirection = new Vector3(
             Math.sin(striker.yaw),
-            0.4,
+            0.35,
             Math.cos(striker.yaw)
           ).normalize();
-          this.velocity = pulseDirection.scale(this.maxSpeed * 0.96);
-          this.audioEngine.playBallHit(2.6);
+          this.velocity = pulseDirection.scale(this.maxSpeed * 0.98);
+          this.audioEngine.playBallHit(3.2);
         }
       }
     });

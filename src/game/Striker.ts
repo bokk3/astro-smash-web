@@ -30,15 +30,15 @@ export class Striker {
   public pitch: number = 0;
   public roll: number = 0;
 
-  // 3D Flight & Aerodynamics
-  public maxSpeed: number = 30;          // Standard top ground speed
-  public boostMaxSpeed: number = 52;     // Afterburner speed
-  public supersonicSpeed: number = 44;   // Supersonic threshold
-  public acceleration: number = 40;
-  public groundTurnSpeed: number = 3.8;  // Radians per sec
-  public airTurnSpeed: number = 4.2;     // Air rotational agility
-  public linearDrag: number = 0.94;
-  public gravity: number = 28;           // 3D downward gravity
+  // 3D Flight & Aerodynamics (HYPER-VELOCITY SPECS)
+  public maxSpeed: number = 48;          // ~173 KM/H base ground top speed
+  public boostMaxSpeed: number = 88;     // ~317 KM/H Hypersonic afterburner
+  public supersonicSpeed: number = 58;   // ~209 KM/H Supersonic threshold
+  public acceleration: number = 85;      // Explosive ground acceleration
+  public groundTurnSpeed: number = 5.2;  // High-precision flick steering
+  public airTurnSpeed: number = 6.2;     // Rapid air rotation agility
+  public linearDrag: number = 0.955;     // High kinetic momentum conservation
+  public gravity: number = 34;           // Snappy responsive aerial gravity
 
   // Jump & Dodge Flip Mechanics
   public isGrounded: boolean = true;
@@ -47,7 +47,7 @@ export class Striker {
   public airTime: number = 0;
   public isDodgeFlipping: boolean = false;
   public dodgeFlipTimer: number = 0;
-  public dodgeFlipDuration: number = 0.65;
+  public dodgeFlipDuration: number = 0.38;
   public dodgeFlipType: 'front' | 'back' | 'left' | 'right' | 'diagonal' | 'neutral' = 'neutral';
 
   // Supersonic & Demolition State
@@ -255,10 +255,10 @@ export class Striker {
 
       // Ground Jump
       if (inputs.jump && this.jumpCooldown <= 0) {
-        this.velocity.y = 17.5;
+        this.velocity.y = 23.5;
         this.isGrounded = false;
         this.jumpCount = 1;
-        this.jumpCooldown = 0.22;
+        this.jumpCooldown = 0.18;
         this.audioEngine.playJump();
       }
     } else {
@@ -268,9 +268,9 @@ export class Striker {
       // Double Jump or Dodge Flip (Within 1.4s of leaving ground)
       if (inputs.jump && this.jumpCount === 1 && this.airTime < 1.4 && this.jumpCooldown <= 0) {
         this.jumpCount = 2;
-        this.jumpCooldown = 0.3;
+        this.jumpCooldown = 0.25;
 
-        const hasDirection = Math.abs(inputs.throttle) > 0.2 || Math.abs(inputs.steer) > 0.2;
+        const hasDirection = Math.abs(inputs.throttle) > 0.15 || Math.abs(inputs.steer) > 0.15;
 
         if (hasDirection) {
           // Kinetic Dodge Flip
@@ -280,17 +280,17 @@ export class Striker {
           const forwardVec = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
           const rightVec = new Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-          const dodgeImpulse = forwardVec.scale(inputs.throttle * 19)
-            .add(rightVec.scale(inputs.steer * 17));
+          const dodgeImpulse = forwardVec.scale(inputs.throttle * 36)
+            .add(rightVec.scale(inputs.steer * 32));
           
           this.velocity.x += dodgeImpulse.x;
           this.velocity.z += dodgeImpulse.z;
-          this.velocity.y = Math.max(this.velocity.y, 4.0); // Slight lift
+          this.velocity.y = Math.max(this.velocity.y, 6.5); // Snappy pop
 
           this.audioEngine.playDodgeFlip();
         } else {
           // Neutral Double Jump
-          this.velocity.y = 15.0;
+          this.velocity.y = 19.5;
           this.audioEngine.playJump();
         }
       }
@@ -355,7 +355,7 @@ export class Striker {
 
     if (this.isGrounded) {
       // Ground driving
-      const accel = this.isBoosting ? this.acceleration * 1.9 : this.acceleration;
+      const accel = this.isBoosting ? this.acceleration * 2.6 : this.acceleration;
 
       if (Math.abs(inputs.throttle) > 0.05) {
         this.velocity.addInPlace(forward2D.scale(inputs.throttle * accel * dt));
@@ -364,7 +364,7 @@ export class Striker {
     } else {
       // Aerial boost flight (Thrusts in 3D direction of car nose!)
       if (this.isBoosting) {
-        this.velocity.addInPlace(forward3D.scale(this.acceleration * 2.1 * dt));
+        this.velocity.addInPlace(forward3D.scale(this.acceleration * 2.8 * dt));
       }
       // Gravity in air
       this.velocity.y -= this.gravity * dt;
