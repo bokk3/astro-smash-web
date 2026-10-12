@@ -16,6 +16,7 @@ export interface MobileStrikerInputs {
   pulse: boolean;
   airRollLeft: boolean;
   airRollRight: boolean;
+  drift?: boolean;
 }
 
 export class TouchControls {
@@ -37,6 +38,7 @@ export class TouchControls {
   private isPulsingThisFrame: boolean = false;
   private isRollingLeft: boolean = false;
   private isRollingRight: boolean = false;
+  private isDrifting: boolean = false;
 
   // Callback for camera & garage
   private camToggleCallback: (() => void) | null = null;
@@ -51,6 +53,7 @@ export class TouchControls {
   private pulseBtn: HTMLElement | null = null;
   private rollLBtn: HTMLElement | null = null;
   private rollRBtn: HTMLElement | null = null;
+  private driftBtn: HTMLElement | null = null;
   private camBtn: HTMLElement | null = null;
   private garageBtn: HTMLElement | null = null;
 
@@ -137,6 +140,12 @@ export class TouchControls {
 
         <!-- Primary Action Cluster -->
         <div class="flex items-center gap-3">
+          <!-- Drift / Handbrake Button -->
+          <button id="touchDriftBtn" class="w-14 h-14 rounded-2xl bg-black/70 border border-amber-500/50 text-amber-400 text-xs font-mono font-bold active:scale-95 active:bg-amber-950/80 backdrop-blur-md shadow-[0_0_15px_rgba(245,158,11,0.3)] flex flex-col items-center justify-center">
+            <span class="text-sm">💨</span>
+            <span class="text-[9px]">DRIFT</span>
+          </button>
+
           <!-- Kinetic Pulse Button -->
           <button id="touchPulseBtn" class="w-14 h-14 rounded-2xl bg-black/70 border border-purple-500/50 text-fuchsia-400 text-xs font-mono font-bold active:scale-95 active:bg-fuchsia-950/80 backdrop-blur-md shadow-[0_0_15px_rgba(255,0,255,0.3)] flex flex-col items-center justify-center">
             <span class="text-sm">⚡</span>
@@ -168,6 +177,7 @@ export class TouchControls {
     this.pulseBtn = document.getElementById('touchPulseBtn');
     this.rollLBtn = document.getElementById('touchRollLBtn');
     this.rollRBtn = document.getElementById('touchRollRBtn');
+    this.driftBtn = document.getElementById('touchDriftBtn');
     this.camBtn = document.getElementById('touchCamBtn');
     this.garageBtn = document.getElementById('touchGarageBtn');
   }
@@ -243,6 +253,21 @@ export class TouchControls {
       };
       this.rollRBtn.addEventListener('touchend', endRollR, { passive: false });
       this.rollRBtn.addEventListener('touchcancel', endRollR, { passive: false });
+    }
+
+    // Drift / Handbrake button
+    if (this.driftBtn) {
+      this.driftBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        this.isDrifting = true;
+        this.triggerHaptic(14);
+      }, { passive: false });
+      const endDrift = (e: TouchEvent) => {
+        e.preventDefault();
+        this.isDrifting = false;
+      };
+      this.driftBtn.addEventListener('touchend', endDrift, { passive: false });
+      this.driftBtn.addEventListener('touchcancel', endDrift, { passive: false });
     }
 
     // Cam button
@@ -345,7 +370,8 @@ export class TouchControls {
       jump,
       pulse,
       airRollLeft: this.isRollingLeft,
-      airRollRight: this.isRollingRight
+      airRollRight: this.isRollingRight,
+      drift: this.isDrifting
     };
   }
 }

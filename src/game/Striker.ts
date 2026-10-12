@@ -54,6 +54,7 @@ export interface StrikerInputs {
   pulse: boolean;   // KeyF / Left-Click / HOTAS fire
   airRollLeft: boolean;  // KeyQ / Mobile Roll Left
   airRollRight: boolean; // KeyE / Mobile Roll Right
+  drift?: boolean;       // Control / Shift-Steer / Mobile Drift
 }
 
 export class Striker {
@@ -115,6 +116,17 @@ export class Striker {
   public pulseCooldown: number = 0;
   public isPulseActive: boolean = false;
 
+  // Drift & Power-Slide Mechanics
+  public isDrifting: boolean = false;
+  private driftSkidTimer: number = 0;
+  public activeSkidSegments: { mesh: Mesh; life: number; maxLife: number }[] = [];
+
+  // Aerodynamic Mach Shockwave Cone & Vapor Rings
+  public machConeMesh: Mesh | null = null;
+  public machConeMat: StandardMaterial | null = null;
+  private vaporRingTimer: number = 0;
+  private activeVaporRings: { mesh: Mesh; vel: Vector3; scale: number; alpha: number }[] = [];
+
   // Visuals & Effects
   private thrusterParticles: ParticleSystem | null = null;
   private supersonicTrails: ParticleSystem | null = null;
@@ -135,6 +147,25 @@ export class Striker {
     this.rootMesh = new Mesh(`striker_${this.team}`, this.scene);
     this.rootMesh.position = this.position;
     this.rootMesh.rotation.y = this.yaw;
+
+    // Aerodynamic Mach Shockwave Cone
+    this.machConeMesh = MeshBuilder.CreateCylinder(`mach_cone_${this.team}`, {
+      diameterTop: 0.1,
+      diameterBottom: 4.8,
+      height: 3.2,
+      tessellation: 24
+    }, this.scene);
+    this.machConeMesh.parent = this.rootMesh;
+    this.machConeMesh.position = new Vector3(0, 0.1, 0.4);
+    this.machConeMesh.rotation.x = Math.PI / 2;
+
+    this.machConeMat = new StandardMaterial(`mach_cone_mat_${this.team}`, this.scene);
+    this.machConeMat.emissiveColor = new Color3(0.9, 0.98, 1.0);
+    this.machConeMat.diffuseColor = new Color3(0.6, 0.9, 1.0);
+    this.machConeMat.alpha = 0.0;
+    this.machConeMat.disableLighting = true;
+    this.machConeMat.backFaceCulling = false;
+    this.machConeMesh.material = this.machConeMat;
 
     this.setChassis('interceptor');
     this.initThrusterFX(this.primaryColor);
@@ -647,16 +678,19 @@ export class Striker {
       this.roll += (targetRoll - this.roll) * 12 * dt;
       this.pitch += (targetPitch - this.pitch) * 12 * dt;
     } else if (this.isGrounded) {
-      // Ground Steering
+      // Ground Steering & Drift Power-Slide
+      this.isDrifting = !!inputs.drift && !this.isWallRiding;
+      const turnRate = this.isDrifting ? this.groundTurnSpeed * 1.95 : this.groundTurnSpeed;
       if (Math.abs(inputs.steer) > 0.05) {
-        this.yaw += inputs.steer * this.groundTurnSpeed * dt;
+        this.yaw += inputs.steer * turnRate * dt;
       }
       // Aerodynamic banking
-      const targetRoll = -inputs.steer * 0.45;
+      const targetRoll = -inputs.steer * (this.isDrifting ? 0.65 : 0.45);
       this.roll += (targetRoll - this.roll) * 10 * dt;
       const targetPitch = inputs.throttle * 0.12;
       this.pitch += (targetPitch - this.pitch) * 10 * dt;
     } else if (!this.isDodgeFlipping) {
+      this.isDrifting = false;
       // Full 3D Aerial Control (Pitch & Yaw in air)
       this.yaw += inputs.steer * this.airTurnSpeed * dt;
       // In air, W tilts nose down, S tilts nose up
@@ -703,13 +737,30 @@ export class Striker {
       }
       this.velocity.scaleInPlace(this.linearDrag);
     } else if (this.isGrounded) {
-      // Ground driving
+      // Ground driving & Drift power-slide
       const accel = this.isBoosting ? this.acceleration * 2.6 : this.acceleration;
 
       if (Math.abs(inputs.throttle) > 0.05) {
         this.velocity.addInPlace(forward2D.scale(inputs.throttle * accel * dt));
       }
-      this.velocity.scaleInPlace(this.linearDrag);
+
+      if (this.isDrifting) {
+        // Lateral kinetic slip when handbraking
+        const right2D = new Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+        this.velocity.addInPlace(right2D.scale(inputs.steer * 42 * dt));
+        this.velocity.scaleInPlace(Math.pow(0.988, dt * 60));
+
+        // Spawn glowing tire drift skid tracks
+        if (this.velocity.length() > 12) {
+          this.driftSkidTimer -= dt;
+          if (this.driftSkidTimer <= 0) {
+            this.driftSkidTimer = 0.045;
+            this.spawnDriftSkidSegment();
+          }
+        }
+      } else {
+        this.velocity.scaleInPlace(this.linearDrag);
+      }
     } else {
       // Aerial boost flight (Thrusts in 3D direction of car nose!)
       if (this.isBoosting) {
@@ -729,13 +780,35 @@ export class Striker {
       this.velocity.scaleInPlace(currentMax / currentSpeed);
     }
 
-    // 7. Supersonic Detection & Audio
+    // Update continuous drift tire screech audio for player
+    if (this.team === 'cyan') {
+      this.audioEngine.updateDrift(this.isDrifting, currentSpeed);
+    }
+
+    // 7. Supersonic Detection & Mach Cone Audio/Visuals
     this.isSupersonic = currentSpeed >= this.supersonicSpeed;
     if (this.isSupersonic && !this.supersonicTriggered) {
       this.supersonicTriggered = true;
       this.audioEngine.playSonicBoom();
     } else if (!this.isSupersonic) {
       this.supersonicTriggered = false;
+    }
+
+    if (this.machConeMat) {
+      if (this.isSupersonic) {
+        const pulse = 0.38 + Math.sin(performance.now() * 0.02) * 0.16;
+        this.machConeMat.alpha = pulse;
+        const scalePulse = 1.0 + Math.sin(performance.now() * 0.025) * 0.08;
+        this.machConeMesh?.scaling.set(scalePulse, 1.0, scalePulse);
+
+        this.vaporRingTimer -= dt;
+        if (this.vaporRingTimer <= 0) {
+          this.vaporRingTimer = 0.14;
+          this.spawnMachVaporRing();
+        }
+      } else {
+        this.machConeMat.alpha = 0;
+      }
     }
 
     // 8. Integrate Position
@@ -836,6 +909,107 @@ export class Striker {
     if (this.team === 'cyan') {
       this.audioEngine.updateThrusters(isThrusting, this.isBoosting);
     }
+
+    // 11. Update Active Drift Skid Marks
+    for (let i = this.activeSkidSegments.length - 1; i >= 0; i--) {
+      const skid = this.activeSkidSegments[i];
+      skid.life -= dt;
+      const alpha = Math.max(0, (skid.life / skid.maxLife) * 0.75);
+      if (skid.mesh.material) {
+        (skid.mesh.material as StandardMaterial).alpha = alpha;
+      }
+      if (skid.life <= 0) {
+        skid.mesh.dispose();
+        this.activeSkidSegments.splice(i, 1);
+      }
+    }
+
+    // 12. Update Active Mach Vapor Rings
+    for (let i = this.activeVaporRings.length - 1; i >= 0; i--) {
+      const ring = this.activeVaporRings[i];
+      ring.scale += 3.8 * dt;
+      ring.mesh.scaling.set(ring.scale, ring.scale, ring.scale);
+      ring.alpha -= 1.8 * dt;
+      if (ring.mesh.material) {
+        (ring.mesh.material as StandardMaterial).alpha = Math.max(0, ring.alpha);
+      }
+      ring.mesh.position.addInPlace(ring.vel.scale(dt));
+      if (ring.alpha <= 0) {
+        ring.mesh.dispose();
+        this.activeVaporRings.splice(i, 1);
+      }
+    }
+  }
+
+  private spawnDriftSkidSegment(): void {
+    const leftOffset = new Vector3(-1.15, 0.035, -1.2);
+    const rightOffset = new Vector3(1.15, 0.035, -1.2);
+
+    const cosY = Math.cos(this.yaw);
+    const sinY = Math.sin(this.yaw);
+
+    const rotOffset = (v: Vector3) => new Vector3(
+      v.x * cosY + v.z * sinY,
+      v.y,
+      -v.x * sinY + v.z * cosY
+    );
+
+    const leftPos = this.position.add(rotOffset(leftOffset));
+    const rightPos = this.position.add(rotOffset(rightOffset));
+
+    [leftPos, rightPos].forEach(pos => {
+      pos.y = 0.035;
+      const track = MeshBuilder.CreatePlane(`skid_${this.team}_${Date.now()}_${Math.random()}`, {
+        width: 0.38,
+        height: 1.2
+      }, this.scene);
+      track.rotation.x = Math.PI / 2;
+      track.rotation.y = this.yaw;
+      track.position = pos;
+      track.isPickable = false;
+
+      const mat = new StandardMaterial(`skid_seg_mat_${Math.random()}`, this.scene);
+      mat.emissiveColor = this.primaryColor;
+      mat.diffuseColor = this.primaryColor;
+      mat.alpha = 0.75;
+      mat.disableLighting = true;
+      track.material = mat;
+
+      this.activeSkidSegments.push({
+        mesh: track,
+        life: 4.5,
+        maxLife: 4.5
+      });
+    });
+  }
+
+  private spawnMachVaporRing(): void {
+    const ring = MeshBuilder.CreateTorus(`mach_ring_${this.team}_${Date.now()}`, {
+      diameter: 3.2,
+      thickness: 0.18,
+      tessellation: 24
+    }, this.scene);
+
+    const fwd = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    ring.position = this.position.subtract(fwd.scale(2.2));
+    ring.rotation.x = this.pitch + Math.PI / 2;
+    ring.rotation.y = this.yaw;
+    ring.rotation.z = this.roll;
+    ring.isPickable = false;
+
+    const ringMat = new StandardMaterial(`mach_ring_mat_${Math.random()}`, this.scene);
+    ringMat.emissiveColor = new Color3(1.0, 1.0, 1.0);
+    ringMat.diffuseColor = this.primaryColor;
+    ringMat.alpha = 0.65;
+    ringMat.disableLighting = true;
+    ring.material = ringMat;
+
+    this.activeVaporRings.push({
+      mesh: ring,
+      vel: this.velocity.scale(0.35),
+      scale: 1.0,
+      alpha: 0.65
+    });
   }
 
   public demolish(): void {
@@ -864,6 +1038,8 @@ export class Striker {
     this.isWallRiding = false;
     this.jumpCount = 0;
     this.isDodgeFlipping = false;
+    this.isDrifting = false;
+    if (this.machConeMat) this.machConeMat.alpha = 0;
     this.boostMeter = 33; // Standard reset boost
     this.isSupersonic = false;
     this.isDemolished = false;

@@ -10,7 +10,11 @@ import {
   GlowLayer,
   DefaultRenderingPipeline,
   ImageProcessingConfiguration,
-  ShadowGenerator
+  ShadowGenerator,
+  Mesh,
+  MeshBuilder,
+  StandardMaterial,
+  Color3
 } from '@babylonjs/core';
 import { Arena } from './Arena';
 import { Striker, type StrikerInputs, type ChassisType, type TrailCosmetic } from './Striker';
@@ -57,8 +61,10 @@ export class Game {
   public scoreCyan: number = 0;
   public scoreMagenta: number = 0;
   public matchSecondsRemaining: number = 180;
+  public isOvertime: boolean = false;
   public isGoalFreeze: boolean = false;
   public goalFreezeTimer: number = 0;
+  private activeGoalShockwaves: { mesh: Mesh; scale: number; alpha: number; team: 'cyan' | 'magenta' }[] = [];
 
   // Goal Replay Buffer & State
   private replayBuffer: ReplayFrame[] = [];
@@ -90,6 +96,8 @@ export class Game {
   private domCamLabel: HTMLElement | null = null;
   private domSpeedLines: HTMLElement | null = null;
   private domSpeedTier: HTMLElement | null = null;
+  private domQuickChatToast: HTMLElement | null = null;
+  private quickChatToastTimer: number = 0;
 
   // Garage Customization DOM Elements
   private domGarageModal: HTMLElement | null = null;
@@ -232,6 +240,7 @@ export class Game {
     this.domCamLabel = document.getElementById('camLabel');
     this.domSpeedLines = document.getElementById('speedLinesOverlay');
     this.domSpeedTier = document.getElementById('speedTier');
+    this.domQuickChatToast = document.getElementById('quickChatToast');
 
     // Garage
     this.domGarageModal = document.getElementById('garageModal');
@@ -283,13 +292,19 @@ export class Game {
         this.toggleMultiplayerModal();
       }
 
-      // Camera toggle: C or B toggles Ball Cam / Chase Cam
-      if (e.code === 'KeyC' || e.code === 'KeyB') {
+      // Camera toggle: B or V toggles Ball Cam / Chase Cam
+      if (e.code === 'KeyB' || e.code === 'KeyV') {
         this.toggleCamera();
       }
       if (e.code === 'KeyF') {
         this.mousePulseTriggered = true;
       }
+
+      // Tactical Quick-Chat Comms (1-4)
+      if (e.code === 'Digit1') this.triggerQuickChat('I GOT IT!');
+      if (e.code === 'Digit2') this.triggerQuickChat('DEFENDING!');
+      if (e.code === 'Digit3') this.triggerQuickChat('GREAT SHOT!');
+      if (e.code === 'Digit4') this.triggerQuickChat('CALCULATED.');
     });
 
     window.addEventListener('keyup', (e) => {
@@ -528,6 +543,17 @@ export class Game {
         this.isGoalFreeze = true;
         this.goalFreezeTimer = 1.2;
       }
+
+      // Overtime reconciliation
+      if (packet.isOvertime !== undefined && packet.isOvertime !== this.isOvertime) {
+        this.isOvertime = packet.isOvertime;
+        if (this.isOvertime) {
+          this.audioEngine.playOvertimeKlaxon();
+        }
+      }
+      if (packet.host.isDrifting !== undefined) {
+        this.playerStriker.isDrifting = packet.host.isDrifting;
+      }
     });
   }
 
@@ -666,12 +692,27 @@ export class Game {
     // Capture telemetry buffer for goal replay
     this.recordReplayFrame();
 
-    // Match Timer Countdown
-    this.matchSecondsRemaining = Math.max(0, this.matchSecondsRemaining - dt);
-    const mins = Math.floor(this.matchSecondsRemaining / 60);
-    const secs = Math.floor(this.matchSecondsRemaining % 60);
+    // Match Timer Countdown & Overtime Sudden Death Check
+    if (!this.isOvertime) {
+      this.matchSecondsRemaining = Math.max(0, this.matchSecondsRemaining - dt);
+      if (this.matchSecondsRemaining <= 0) {
+        if (this.scoreCyan === this.scoreMagenta) {
+          this.isOvertime = true;
+          this.audioEngine.playOvertimeKlaxon();
+        }
+      }
+    }
+
     if (this.domMatchTimer) {
-      this.domMatchTimer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      if (this.isOvertime) {
+        this.domMatchTimer.textContent = '+ OVERTIME';
+        this.domMatchTimer.className = 'text-xl font-black font-mono text-amber-400 tracking-wider animate-pulse drop-shadow-[0_0_12px_rgba(251,191,36,0.8)]';
+      } else {
+        const mins = Math.floor(this.matchSecondsRemaining / 60);
+        const secs = Math.floor(this.matchSecondsRemaining % 60);
+        this.domMatchTimer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        this.domMatchTimer.className = 'text-xl font-bold font-mono text-slate-200 tracking-wider';
+      }
     }
 
     const isGuest = this.multiplayerEngine.isConnected && this.multiplayerEngine.role === 'GUEST';
@@ -703,6 +744,7 @@ export class Game {
         pulse: playerInputs.pulse,
         airRollLeft: playerInputs.airRollLeft,
         airRollRight: playerInputs.airRollRight,
+        drift: playerInputs.drift,
         pos: { x: this.aiStriker.position.x, y: this.aiStriker.position.y, z: this.aiStriker.position.z },
         rot: { yaw: this.aiStriker.yaw, pitch: this.aiStriker.pitch, roll: this.aiStriker.roll },
         vel: { vx: this.aiStriker.velocity.x, vy: this.aiStriker.velocity.y, vz: this.aiStriker.velocity.z },
@@ -728,6 +770,7 @@ export class Game {
           pulse: this.latestGuestInput.pulse,
           airRollLeft: this.latestGuestInput.airRollLeft,
           airRollRight: this.latestGuestInput.airRollRight,
+          drift: this.latestGuestInput.drift,
         };
         this.aiStriker.update(dt, guestInputs, bounds);
 
@@ -791,10 +834,12 @@ export class Game {
           chassis: this.playerStriker.getChassis(),
           trail: this.playerStriker.getTrail(),
           isSupersonic: this.playerStriker.isSupersonic,
+          isDrifting: this.playerStriker.isDrifting,
         },
         scores: { cyan: this.scoreCyan, magenta: this.scoreMagenta },
         matchTimer: this.matchSecondsRemaining,
         goalDetonated: this.isGoalFreeze,
+        isOvertime: this.isOvertime,
       });
     } else {
       // --- OFFLINE SINGLE-PLAYER SIMULATION ---
@@ -819,6 +864,33 @@ export class Game {
         this.onGoal('magenta');
       }
     }
+
+    // 3. Update Active Goal Shockwave Blast Rings
+    for (let i = this.activeGoalShockwaves.length - 1; i >= 0; i--) {
+      const sw = this.activeGoalShockwaves[i];
+      sw.scale += dt * 42;
+      sw.alpha -= dt * 0.9;
+      sw.mesh.scaling.set(sw.scale, sw.scale, sw.scale);
+      if (sw.mesh.material) {
+        (sw.mesh.material as StandardMaterial).alpha = Math.max(0, sw.alpha);
+      }
+      if (sw.alpha <= 0) {
+        sw.mesh.dispose();
+        this.activeGoalShockwaves.splice(i, 1);
+      }
+    }
+
+    // 4. Update Quick-Chat Toast Timer
+    if (this.quickChatToastTimer > 0) {
+      this.quickChatToastTimer -= dt;
+      if (this.quickChatToastTimer <= 0 && this.domQuickChatToast) {
+        this.domQuickChatToast.className = 'absolute top-20 left-6 pointer-events-none opacity-0 transform -translate-y-4 transition-all duration-200 z-30 font-mono text-xs font-bold text-cyan-300 bg-black/85 px-4 py-2 rounded-xl border border-cyan-500/50 backdrop-blur-md shadow-[0_0_20px_rgba(0,243,255,0.4)]';
+      }
+    }
+
+    // 5. Update Procedural Tire Screech Audio for Active Craft
+    const activeShip = isGuest ? this.aiStriker : this.playerStriker;
+    this.audioEngine.updateDrift(activeShip.isDrifting, activeShip.velocity.length());
 
     // Dynamic Camera & HUD
     this.updateCamera(dt);
@@ -899,7 +971,16 @@ export class Game {
       if (this.hotasFrame.fire) pulse = true;
     }
 
-    return { throttle, steer, boost, jump, pulse, airRollLeft, airRollRight };
+    const driftKey = !!(
+      this.keyState['ControlLeft'] ||
+      this.keyState['ControlRight'] ||
+      this.keyState['KeyC'] ||
+      this.keyState['AltLeft'] ||
+      this.keyState['KeyX']
+    );
+    const drift = driftKey || !!touch.drift;
+
+    return { throttle, steer, boost, jump, pulse, airRollLeft, airRollRight, drift };
   }
 
   private getAiInputs(_dt: number): StrikerInputs {
@@ -907,9 +988,10 @@ export class Game {
     let steer = 0;
     let boost = false;
     let jump = false;
+    let drift = false;
 
     if (this.aiStriker.isDemolished) {
-      return { throttle: 0, steer: 0, boost: false, jump: false, pulse: false, airRollLeft: false, airRollRight: false };
+      return { throttle: 0, steer: 0, boost: false, jump: false, pulse: false, airRollLeft: false, airRollRight: false, drift: false };
     }
 
     const ballPos = this.puck.position;
@@ -934,6 +1016,9 @@ export class Game {
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
       steer = Math.min(Math.max(angleDiff * 1.6, -1.0), 1.0);
+      if (Math.abs(angleDiff) > 0.85 && this.aiStriker.isGrounded) {
+        drift = true;
+      }
 
       if (Math.abs(angleDiff) < 0.65) {
         throttle = 1.0;
@@ -955,7 +1040,7 @@ export class Game {
       boost = true;
     }
 
-    return { throttle, steer, boost, jump, pulse: false, airRollLeft: false, airRollRight: false };
+    return { throttle, steer, boost, jump, pulse: false, airRollLeft: false, airRollRight: false, drift };
   }
 
   private updateCamera(dt: number): void {
@@ -1024,16 +1109,32 @@ export class Game {
 
     // Goal Radial Shockwave flings all crafts
     const goalCenter = new Vector3(0, 3, scoringTeam === 'cyan' ? 52 : -52);
+    this.audioEngine.playGoalShockwave();
+    this.spawnGoalBlastMesh(goalCenter, scoringTeam);
+
     [this.playerStriker, this.aiStriker].forEach(ship => {
       const blastDir = ship.position.subtract(goalCenter).normalize();
-      ship.velocity = blastDir.scale(38);
-      ship.velocity.y = 22;
+      ship.velocity = blastDir.scale(46);
+      ship.velocity.y = 26;
       ship.isGrounded = false;
     });
 
+    // Concussion camera rumble
+    const shake = 0.45;
+    this.chaseCamera.position.x += (Math.random() - 0.5) * shake * 2;
+    this.chaseCamera.position.y += (Math.random() - 0.5) * shake;
+    this.chaseCamera.position.z += (Math.random() - 0.5) * shake * 2;
+
     if (this.domGoalBanner && this.domGoalTitle && this.domGoalSubtitle) {
       const speedKm = Math.round(this.puck.velocity.length() * 3.6);
-      if (scoringTeam === 'cyan') {
+      if (this.isOvertime) {
+        this.domGoalTitle.textContent = 'GOLDEN GOAL!';
+        this.domGoalTitle.className = scoringTeam === 'cyan'
+          ? 'text-6xl md:text-8xl font-black italic tracking-widest text-[#00F3FF] drop-shadow-[0_0_45px_rgba(0,243,255,1)]'
+          : 'text-6xl md:text-8xl font-black italic tracking-widest text-[#FF00FF] drop-shadow-[0_0_45px_rgba(255,0,255,1)]';
+        this.domGoalSubtitle.textContent = `${scoringTeam.toUpperCase()} WINS IN SUDDEN DEATH OVERTIME! // ${speedKm} KM/H BOOMER`;
+        this.isOvertime = false;
+      } else if (scoringTeam === 'cyan') {
         this.domGoalTitle.textContent = 'GOAL!';
         this.domGoalTitle.className = 'text-6xl md:text-8xl font-black italic tracking-widest text-[#00F3FF] drop-shadow-[0_0_45px_rgba(0,243,255,1)]';
         this.domGoalSubtitle.textContent = `CYAN STRIKER SCORED // ${speedKm} KM/H BOOMER`;
@@ -1044,6 +1145,39 @@ export class Game {
       }
       this.domGoalBanner.className = 'self-center transform translate-y-0 scale-100 opacity-100 transition-all duration-300 pointer-events-none text-center animate-goal';
     }
+  }
+
+  private spawnGoalBlastMesh(center: Vector3, team: 'cyan' | 'magenta'): void {
+    const shockTorus = MeshBuilder.CreateTorus(`goal_shockwave_${Date.now()}`, {
+      diameter: 3.5,
+      thickness: 1.2,
+      tessellation: 36
+    }, this.scene);
+    shockTorus.position.copyFrom(center);
+    shockTorus.rotation.x = Math.PI / 2;
+
+    const blastMat = new StandardMaterial(`blast_mat_${Date.now()}`, this.scene);
+    const color = team === 'cyan' ? new Color3(0, 0.95, 1.0) : new Color3(1.0, 0, 1.0);
+    blastMat.emissiveColor = color;
+    blastMat.diffuseColor = color;
+    blastMat.alpha = 0.95;
+    blastMat.backFaceCulling = false;
+    shockTorus.material = blastMat;
+
+    this.activeGoalShockwaves.push({
+      mesh: shockTorus,
+      scale: 1.0,
+      alpha: 0.95,
+      team
+    });
+  }
+
+  public triggerQuickChat(msg: string): void {
+    if (!this.domQuickChatToast) return;
+    this.domQuickChatToast.textContent = `TACTICAL // ${msg}`;
+    this.domQuickChatToast.className = 'absolute top-20 left-6 pointer-events-none opacity-100 transform translate-y-0 transition-all duration-200 z-30 font-mono text-xs font-bold text-cyan-300 bg-black/90 px-4 py-2 rounded-xl border border-cyan-400 backdrop-blur-md shadow-[0_0_25px_rgba(0,243,255,0.6)] animate-pulse';
+    this.quickChatToastTimer = 2.4;
+    this.audioEngine.playGarageEquip();
   }
 
   private recordReplayFrame(): void {

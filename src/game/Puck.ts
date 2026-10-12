@@ -6,7 +6,8 @@ import {
   Vector3,
   Mesh,
   PointLight,
-  ParticleSystem
+  ParticleSystem,
+  LinesMesh
 } from '@babylonjs/core';
 import type { AudioEngine } from './AudioEngine';
 import type { Striker } from './Striker';
@@ -31,6 +32,8 @@ export class Puck {
   private trailSystem: ParticleSystem | null = null;
   private ringMesh: Mesh;
   private audioEngine: AudioEngine;
+  private lightningLines: LinesMesh[] = [];
+  private lightningTimer: number = 0;
 
   constructor(scene: Scene, audioEngine: AudioEngine) {
     this.scene = scene;
@@ -262,7 +265,74 @@ export class Puck {
     this.rootMesh.position = this.position;
     this.light.position = this.position;
 
+    // 10. Electrostatic Lightning Arcs when traveling at high kinetic speed
+    this.updateElectrostaticLightning(speed, dt);
+
     return 'none';
+  }
+
+  private updateElectrostaticLightning(speed: number, dt: number): void {
+    this.lightningTimer -= dt;
+    if (this.lightningTimer <= 0) {
+      // Dispose old arcs
+      for (let i = 0; i < this.lightningLines.length; i++) {
+        this.lightningLines[i].dispose();
+      }
+      this.lightningLines = [];
+
+      if (speed < 18) return;
+
+      const numArcs = speed > 50 ? 4 : speed > 30 ? 3 : 2;
+      this.lightningTimer = speed > 50 ? 0.04 : 0.07;
+
+      for (let a = 0; a < numArcs; a++) {
+        const points: Vector3[] = [];
+        points.push(this.position.clone());
+
+        // Target endpoint (random sphere perimeter or downward ground strike)
+        let targetEnd: Vector3;
+        if (Math.random() < 0.45 && this.position.y < 9) {
+          // Ground strike arc
+          targetEnd = new Vector3(
+            this.position.x + (Math.random() - 0.5) * 4.5,
+            0.04,
+            this.position.z + (Math.random() - 0.5) * 4.5
+          );
+        } else {
+          // Aerial electrostatic discharge
+          const arcAngle = Math.random() * Math.PI * 2;
+          const arcPitch = (Math.random() - 0.5) * Math.PI;
+          const arcDist = this.radius * (1.8 + Math.random() * 2.2);
+          targetEnd = this.position.add(new Vector3(
+            Math.cos(arcAngle) * Math.cos(arcPitch) * arcDist,
+            Math.sin(arcPitch) * arcDist,
+            Math.sin(arcAngle) * Math.cos(arcPitch) * arcDist
+          ));
+        }
+
+        // Generate jagged midpoints with Brownian displacement
+        const steps = 6;
+        for (let i = 1; i < steps; i++) {
+          const t = i / steps;
+          const interp = Vector3.Lerp(this.position, targetEnd, t);
+          const jitter = (1.0 - Math.abs(t - 0.5) * 1.5) * 0.95;
+          interp.x += (Math.random() - 0.5) * jitter;
+          interp.y += (Math.random() - 0.5) * jitter;
+          interp.z += (Math.random() - 0.5) * jitter;
+          points.push(interp);
+        }
+        points.push(targetEnd);
+
+        const arc = MeshBuilder.CreateLines(`puck_lightning_${a}`, { points }, this.scene);
+        arc.color = speed > 50
+          ? new Color3(1.0, 0.95, 0.4) // Intense golden-white plasma
+          : Math.random() > 0.5
+            ? new Color3(0, 0.95, 1)   // Electric Cyan
+            : new Color3(0.9, 0.2, 1); // Neon Violet
+        arc.isPickable = false;
+        this.lightningLines.push(arc);
+      }
+    }
   }
 
   public reset(): void {
@@ -271,5 +341,7 @@ export class Puck {
     this.rootMesh.position = this.position;
     this.light.position = this.position;
     this.groundReticle.position.set(0, 0.06, 0);
+    this.lightningLines.forEach(l => l.dispose());
+    this.lightningLines = [];
   }
 }

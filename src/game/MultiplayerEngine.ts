@@ -30,10 +30,12 @@ export interface HostSyncPacket {
     chassis: ChassisType;
     trail: TrailCosmetic;
     isSupersonic: boolean;
+    isDrifting?: boolean;
   };
   scores: { cyan: number; magenta: number };
   matchTimer: number;
   goalDetonated: boolean;
+  isOvertime?: boolean;
 }
 
 export interface GuestInputPacket {
@@ -46,6 +48,7 @@ export interface GuestInputPacket {
   pulse: boolean;
   airRollLeft: boolean;
   airRollRight: boolean;
+  drift?: boolean;
   pos: { x: number; y: number; z: number };
   rot: { yaw: number; pitch: number; roll: number };
   vel: { vx: number; vy: number; vz: number };

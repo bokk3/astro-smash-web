@@ -338,7 +338,7 @@ export class Arena {
     // Header badge
     ctx.fillStyle = '#FF00FF';
     ctx.font = 'bold 20px monospace';
-    ctx.fillText('⚡ TACHYON ESPORTS // HYPER-VELOCITY LEAGUE ⚡', 24, 38);
+    ctx.fillText('⚡ TACHYON ESPORTS // HYPER-VELOCITY CIRCUIT ⚡', 24, 38);
 
     // Scrolling text banner
     ctx.fillStyle = '#00F3FF';

@@ -8,6 +8,9 @@ export class AudioEngine {
   private thrusterGain: GainNode | null = null;
   private thrusterOsc: OscillatorNode | null = null;
   private isThrusterActive: boolean = false;
+  private driftGain: GainNode | null = null;
+  private driftOsc: OscillatorNode | null = null;
+  private isDriftingActive: boolean = false;
 
   constructor() {
     // AudioContext will be initialized on first user gesture
@@ -425,6 +428,117 @@ export class AudioEngine {
     gain.connect(ctx.destination);
     osc.start(t);
     osc.stop(t + 0.24);
+  }
+
+  /**
+   * Continuous High-G Tire Friction Drift Screech
+   */
+  public updateDrift(isDrifting: boolean, speed: number): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    if (isDrifting && speed > 12) {
+      if (!this.isDriftingActive) {
+        this.isDriftingActive = true;
+        this.driftOsc = ctx.createOscillator();
+        this.driftGain = ctx.createGain();
+
+        this.driftOsc.type = 'sawtooth';
+        this.driftOsc.frequency.setValueAtTime(380, ctx.currentTime);
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(850, ctx.currentTime);
+        filter.Q.setValueAtTime(4.0, ctx.currentTime);
+
+        this.driftGain.gain.setValueAtTime(0.01, ctx.currentTime);
+        this.driftGain.gain.linearRampToValueAtTime(0.14, ctx.currentTime + 0.08);
+
+        this.driftOsc.connect(filter);
+        filter.connect(this.driftGain);
+        this.driftGain.connect(ctx.destination);
+        this.driftOsc.start();
+      }
+
+      if (this.driftOsc && this.driftGain) {
+        const speedRatio = Math.min(1.0, speed / 65);
+        const targetFreq = 420 + speedRatio * 320;
+        const targetVol = 0.08 + speedRatio * 0.12;
+        this.driftOsc.frequency.setTargetAtTime(targetFreq, ctx.currentTime, 0.05);
+        this.driftGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.05);
+      }
+    } else if (this.isDriftingActive) {
+      this.isDriftingActive = false;
+      if (this.driftGain) {
+        this.driftGain.gain.setTargetAtTime(0.001, ctx.currentTime, 0.08);
+        setTimeout(() => {
+          if (!this.isDriftingActive && this.driftOsc) {
+            try { this.driftOsc.stop(); } catch {}
+            this.driftOsc.disconnect();
+            this.driftOsc = null;
+          }
+        }, 120);
+      }
+    }
+  }
+
+  /**
+   * Catastrophic Goal Blast Physics Shockwave Sound
+   */
+  public playGoalShockwave(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(95, t);
+    osc.frequency.exponentialRampToValueAtTime(24, t + 0.9);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(320, t);
+    filter.frequency.exponentialRampToValueAtTime(45, t + 0.9);
+
+    gain.gain.setValueAtTime(0.65, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 1.15);
+  }
+
+  /**
+   * Stadium Overtime Sudden Death Emergency Siren
+   */
+  public playOvertimeKlaxon(): void {
+    if (this.muted) return;
+    const ctx = this.initCtx();
+    if (!ctx) return;
+
+    const t = ctx.currentTime;
+    [220, 277].forEach(freq => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.linearRampToValueAtTime(freq * 1.25, t + 0.35);
+      osc.frequency.linearRampToValueAtTime(freq, t + 0.7);
+
+      gain.gain.setValueAtTime(0.35, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 1.25);
+    });
   }
 }
 
