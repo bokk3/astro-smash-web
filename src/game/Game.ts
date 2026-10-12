@@ -6,7 +6,11 @@ import {
   HemisphericLight,
   DirectionalLight,
   UniversalCamera,
-  ArcRotateCamera
+  ArcRotateCamera,
+  GlowLayer,
+  DefaultRenderingPipeline,
+  ImageProcessingConfiguration,
+  ShadowGenerator
 } from '@babylonjs/core';
 import { Arena } from './Arena';
 import { Striker, type StrikerInputs, type ChassisType, type TrailCosmetic } from './Striker';
@@ -141,6 +145,26 @@ export class Game {
     this.aiStriker = new Striker(this.scene, 'magenta', new Vector3(0, 1.1, 30), Math.PI, this.audioEngine);
     this.puck = new Puck(this.scene, this.audioEngine);
 
+    // Register high-gloss mirror floor reflection casters
+    this.arena.addMirrorRenderMesh(this.playerStriker.rootMesh);
+    this.arena.addMirrorRenderMesh(this.aiStriker.rootMesh);
+    this.arena.addMirrorRenderMesh(this.puck.rootMesh);
+
+    // Dynamic Soft Shadows
+    const shadowGen = new ShadowGenerator(1024, dirLight);
+    shadowGen.useBlurExponentialShadowMap = true;
+    shadowGen.blurKernel = 24;
+    shadowGen.addShadowCaster(this.playerStriker.rootMesh, true);
+    shadowGen.addShadowCaster(this.aiStriker.rootMesh, true);
+    shadowGen.addShadowCaster(this.puck.rootMesh, true);
+
+    // Multi-Layer HDR GlowLayer for Radiant Neon Bloom
+    const glowLayer = new GlowLayer('stadium_glow', this.scene, {
+      mainTextureRatio: 0.5,
+      blurKernelSize: 32
+    });
+    glowLayer.intensity = 0.85;
+
     // Cameras
     this.chaseCamera = new UniversalCamera('chaseCam', new Vector3(0, 8, -45), this.scene);
     this.chaseCamera.setTarget(this.playerStriker.position);
@@ -151,6 +175,23 @@ export class Game {
     this.droneCamera.upperRadiusLimit = 160;
 
     this.scene.activeCamera = this.chaseCamera;
+
+    // Cinematic Post-Processing Pipeline (ACES Filmic Tone Mapping, Bloom, FXAA, Vignette)
+    const pipeline = new DefaultRenderingPipeline('defaultPipeline', true, this.scene, [this.chaseCamera, this.droneCamera]);
+    pipeline.bloomEnabled = true;
+    pipeline.bloomThreshold = 0.72;
+    pipeline.bloomWeight = 0.42;
+    pipeline.bloomKernel = 64;
+    pipeline.bloomScale = 0.5;
+    pipeline.fxaaEnabled = true;
+    pipeline.chromaticAberrationEnabled = true;
+    pipeline.chromaticAberration.aberrationAmount = 14;
+    pipeline.imageProcessing.toneMappingEnabled = true;
+    pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    pipeline.imageProcessing.vignetteEnabled = true;
+    pipeline.imageProcessing.vignetteWeight = 1.6;
+    pipeline.imageProcessing.vignetteColor = new Color4(0, 0, 0, 0);
+    pipeline.imageProcessing.vignetteStretch = 0.5;
 
     // Mobile & Touch Controls
     this.touchControls = new TouchControls();

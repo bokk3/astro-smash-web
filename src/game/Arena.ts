@@ -5,7 +5,11 @@ import {
   Color3,
   Vector3,
   PointLight,
-  Mesh
+  Mesh,
+  MirrorTexture,
+  Plane,
+  SpotLight,
+  DynamicTexture
 } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials';
 import type { AudioEngine } from './AudioEngine';
@@ -31,10 +35,15 @@ export class Arena {
   public goalWidth: number = 22;
   public goalHeight: number = 9;
 
+  public groundMesh!: Mesh;
+  public groundMirror!: MirrorTexture;
   public cyanGoalTrigger!: Mesh;
   public magentaGoalTrigger!: Mesh;
   public boostPads: BoostPad[] = [];
 
+  private jumbotrons: { mesh: Mesh; texture: DynamicTexture }[] = [];
+  private jumbotronScroll: number = 0;
+  private jumbotronTimer: number = 0;
   private audioEngine: AudioEngine | null = null;
 
   constructor(scene: Scene, audioEngine?: AudioEngine) {
@@ -48,24 +57,52 @@ export class Arena {
     this.audioEngine = ae;
   }
 
+  public addMirrorRenderMesh(mesh: Mesh): void {
+    if (this.groundMirror && this.groundMirror.renderList) {
+      this.groundMirror.renderList.push(mesh);
+    }
+  }
+
   private buildStadium(): void {
-    // 1. Cybernetic Floor with High-Tech Grid Material
-    const ground = MeshBuilder.CreateGround('arena_ground', {
+    // 1. Polished Obsidian Ground with Real-Time Planar Mirror Reflections
+    this.groundMirror = new MirrorTexture('arena_ground_mirror', 1024, this.scene, true);
+    this.groundMirror.mirrorPlane = new Plane(0, -1, 0, 0);
+    this.groundMirror.blurRatio = 1.0;
+    this.groundMirror.adaptiveBlurKernel = 16;
+
+    this.groundMesh = MeshBuilder.CreateGround('arena_ground', {
       width: this.width,
       height: this.length,
       subdivisions: 4
     }, this.scene);
-    ground.position = new Vector3(0, 0, 0);
+    this.groundMesh.position = new Vector3(0, 0, 0);
 
-    const gridMat = new GridMaterial('arena_ground_mat', this.scene);
+    const groundMat = new StandardMaterial('arena_ground_mat', this.scene);
+    groundMat.diffuseColor = new Color3(0.015, 0.02, 0.035);
+    groundMat.specularColor = new Color3(0.7, 0.85, 1.0);
+    groundMat.specularPower = 128;
+    groundMat.reflectionTexture = this.groundMirror;
+    groundMat.reflectionTexture.level = 0.48; // Crisp, high-gloss wet-look mirror reflection
+    this.groundMesh.material = groundMat;
+    this.groundMesh.receiveShadows = true;
+
+    // Semi-transparent Cyber Grid Overlay right above the mirror floor
+    const gridOverlay = MeshBuilder.CreateGround('arena_grid_overlay', {
+      width: this.width,
+      height: this.length,
+      subdivisions: 4
+    }, this.scene);
+    gridOverlay.position = new Vector3(0, 0.02, 0);
+
+    const gridMat = new GridMaterial('arena_grid_mat', this.scene);
     gridMat.majorUnitFrequency = 6;
-    gridMat.minorUnitVisibility = 0.45;
-    gridMat.gridRatio = 2;
+    gridMat.minorUnitVisibility = 0.35;
+    gridMat.gridRatio = 3;
     gridMat.backFaceCulling = false;
-    gridMat.mainColor = new Color3(0.04, 0.05, 0.08);
-    gridMat.lineColor = new Color3(0.0, 0.75, 0.95);
-    gridMat.opacity = 0.98;
-    ground.material = gridMat;
+    gridMat.mainColor = new Color3(0.02, 0.03, 0.05);
+    gridMat.lineColor = new Color3(0.0, 0.85, 1.0);
+    gridMat.opacity = 0.42;
+    gridOverlay.material = gridMat;
 
     // 2. High Ceiling Transparent Containment Barrier
     const ceiling = MeshBuilder.CreateGround('arena_ceiling', {
@@ -172,6 +209,151 @@ export class Arena {
     magentaLight.diffuse = new Color3(1, 0.1, 0.95);
     magentaLight.intensity = 1.8;
     magentaLight.range = 80;
+
+    // 10. Outer Cyberpunk Orbital Megadome & Atmospheric Truss System
+    this.buildMegadomeAtmosphere();
+  }
+
+  private buildMegadomeAtmosphere(): void {
+    // 1. Cosmic Starfield & Nebula Dome
+    const skySphere = MeshBuilder.CreateSphere('cosmic_sky', { diameter: 360, segments: 16, sideOrientation: Mesh.BACKSIDE }, this.scene);
+    const skyMat = new StandardMaterial('cosmic_sky_mat', this.scene);
+    skyMat.diffuseColor = new Color3(0.01, 0.015, 0.03);
+    skyMat.emissiveColor = new Color3(0.02, 0.03, 0.06);
+    skyMat.disableLighting = true;
+    skySphere.material = skyMat;
+
+    // 2. Grand Outer Megadome Bowl
+    const domeShell = MeshBuilder.CreateCylinder('megadome_shell', {
+      diameterTop: 220,
+      diameterBottom: 180,
+      height: 60,
+      tessellation: 36,
+      sideOrientation: Mesh.BACKSIDE
+    }, this.scene);
+    domeShell.position = new Vector3(0, 26, 0);
+    const domeMat = new StandardMaterial('dome_mat', this.scene);
+    domeMat.diffuseColor = new Color3(0.025, 0.03, 0.045);
+    domeMat.specularColor = new Color3(0.15, 0.25, 0.35);
+    domeMat.emissiveColor = new Color3(0.01, 0.015, 0.025);
+    domeShell.material = domeMat;
+
+    // 3. 4 Corner Stadium Floodlight Towers with High-Intensity Spotlights
+    const towerCoords = [
+      { x: -this.width / 2 - 14, z: -this.length / 2 - 10, rotY: Math.PI / 4, col: new Color3(0, 0.9, 1) },
+      { x: this.width / 2 + 14, z: -this.length / 2 - 10, rotY: -Math.PI / 4, col: new Color3(0, 0.9, 1) },
+      { x: -this.width / 2 - 14, z: this.length / 2 + 10, rotY: 3 * Math.PI / 4, col: new Color3(1, 0.1, 0.9) },
+      { x: this.width / 2 + 14, z: this.length / 2 + 10, rotY: -3 * Math.PI / 4, col: new Color3(1, 0.1, 0.9) },
+    ];
+
+    towerCoords.forEach((t, idx) => {
+      // Pylon Truss column
+      const pylon = MeshBuilder.CreateBox(`flood_pylon_${idx}`, { width: 3, height: 38, depth: 3 }, this.scene);
+      pylon.position = new Vector3(t.x, 19, t.z);
+      const pylonMat = new StandardMaterial(`pylon_mat_${idx}`, this.scene);
+      pylonMat.diffuseColor = new Color3(0.08, 0.09, 0.12);
+      pylonMat.specularColor = new Color3(0.4, 0.5, 0.6);
+      pylon.material = pylonMat;
+
+      // Angled Light Bank Head
+      const head = MeshBuilder.CreateBox(`flood_head_${idx}`, { width: 8, height: 4, depth: 2 }, this.scene);
+      head.position = new Vector3(t.x, 37, t.z);
+      head.rotation.y = t.rotY;
+      head.rotation.x = 0.45; // Angled down toward pitch
+      const headMat = new StandardMaterial(`flood_head_mat_${idx}`, this.scene);
+      headMat.emissiveColor = new Color3(0.95, 0.98, 1.0);
+      head.material = headMat;
+
+      // Stadium SpotLight shining into the pitch
+      const spot = new SpotLight(`stadium_spot_${idx}`, head.position, new Vector3(-t.x * 0.5, -28, -t.z * 0.5).normalize(), Math.PI / 3, 2, this.scene);
+      spot.diffuse = new Color3(0.9, 0.95, 1.0);
+      spot.intensity = 1.4;
+      spot.range = 120;
+    });
+
+    // 4. 3 Massive Curved Space Truss Arches crossing the ceiling
+    [-32, 0, 32].forEach((zArch, idx) => {
+      const arch = MeshBuilder.CreateTorus(`space_arch_${idx}`, {
+        diameter: this.width + 18,
+        thickness: 1.4,
+        tessellation: 36
+      }, this.scene);
+      arch.position = new Vector3(0, 18, zArch);
+      arch.rotation.z = Math.PI / 2;
+      const archMat = new StandardMaterial(`arch_mat_${idx}`, this.scene);
+      archMat.diffuseColor = new Color3(0.06, 0.08, 0.12);
+      archMat.specularColor = new Color3(0.6, 0.7, 0.9);
+      arch.material = archMat;
+
+      // Glowing Neon Spine on arch
+      const neonSpine = MeshBuilder.CreateTorus(`arch_neon_${idx}`, {
+        diameter: this.width + 18.8,
+        thickness: 0.35,
+        tessellation: 36
+      }, this.scene);
+      neonSpine.position = new Vector3(0, 18, zArch);
+      neonSpine.rotation.z = Math.PI / 2;
+      const neonMat = new StandardMaterial(`arch_neon_mat_${idx}`, this.scene);
+      neonMat.emissiveColor = idx === 1 ? new Color3(0, 0.95, 1) : (idx === 0 ? new Color3(0, 0.8, 1) : new Color3(1, 0, 0.9));
+      neonMat.disableLighting = true;
+      neonSpine.material = neonMat;
+    });
+
+    // 5. 4 Giant Holographic Jumbotrons / LED Ribbons
+    const jumbotronConfigs = [
+      { id: 'jumbo_west', pos: new Vector3(-this.width / 2 - 2, 14, 0), rotY: Math.PI / 2, width: 44, height: 7 },
+      { id: 'jumbo_east', pos: new Vector3(this.width / 2 + 2, 14, 0), rotY: -Math.PI / 2, width: 44, height: 7 },
+      { id: 'jumbo_north', pos: new Vector3(0, 15, this.length / 2 + 2), rotY: Math.PI, width: 32, height: 6 },
+      { id: 'jumbo_south', pos: new Vector3(0, 15, -this.length / 2 - 2), rotY: 0, width: 32, height: 6 },
+    ];
+
+    jumbotronConfigs.forEach(cfg => {
+      const plane = MeshBuilder.CreatePlane(cfg.id, { width: cfg.width, height: cfg.height }, this.scene);
+      plane.position = cfg.pos;
+      plane.rotation.y = cfg.rotY;
+
+      const dt = new DynamicTexture(`dt_${cfg.id}`, { width: 512, height: 128 }, this.scene, false);
+      const mat = new StandardMaterial(`mat_${cfg.id}`, this.scene);
+      mat.diffuseTexture = dt;
+      mat.emissiveTexture = dt;
+      mat.emissiveColor = new Color3(0.9, 0.9, 0.9);
+      mat.disableLighting = true;
+      plane.material = mat;
+
+      this.jumbotrons.push({ mesh: plane, texture: dt });
+      this.drawJumbotron(dt, 0);
+    });
+  }
+
+  private drawJumbotron(dt: DynamicTexture, scrollOffset: number): void {
+    const ctx = dt.getContext() as CanvasRenderingContext2D;
+    ctx.fillStyle = '#030509';
+    ctx.fillRect(0, 0, 512, 128);
+
+    // Glowing border frame
+    ctx.strokeStyle = '#00F3FF';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, 506, 122);
+
+    // Header badge
+    ctx.fillStyle = '#FF00FF';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('⚡ TACHYON ESPORTS // HYPER-VELOCITY LEAGUE ⚡', 24, 38);
+
+    // Scrolling text banner
+    ctx.fillStyle = '#00F3FF';
+    ctx.font = 'bold 34px monospace';
+    const text = 'ASTRO-SMASH ARENA // MACH 1 BOOMERS // 60 FPS P2P // OVERDRIVE';
+    const xPos = 40 - (scrollOffset % 600);
+    ctx.fillText(text, xPos, 86);
+    ctx.fillText(text, xPos + 600, 86);
+
+    // Scanlines
+    ctx.fillStyle = 'rgba(0, 243, 255, 0.08)';
+    for (let y = 0; y < 128; y += 4) {
+      ctx.fillRect(0, y, 512, 2);
+    }
+    dt.update();
   }
 
   private buildCornerWall(x: number, z: number, rotationY: number, id: string): void {
@@ -379,6 +561,16 @@ export class Arena {
   }
 
   public update(dt: number): void {
+    // Animate scrolling cyber jumbotrons
+    this.jumbotronTimer += dt;
+    if (this.jumbotronTimer > 0.04) {
+      this.jumbotronTimer = 0;
+      this.jumbotronScroll += 3.5;
+      this.jumbotrons.forEach(j => {
+        this.drawJumbotron(j.texture, this.jumbotronScroll);
+      });
+    }
+
     // Animate Boost Pads and handle respawn timers
     this.boostPads.forEach(pad => {
       if (pad.isActive) {
