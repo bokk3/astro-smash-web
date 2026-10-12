@@ -14,6 +14,7 @@ import { Puck } from './Puck';
 import { AudioEngine } from './AudioEngine';
 import { HotasReceiver, type HotasFrame } from './HotasReceiver';
 import { TouchControls } from './TouchControls';
+import { MultiplayerEngine, type HostSyncPacket, type GuestInputPacket } from './MultiplayerEngine';
 
 export interface ReplayFrame {
   puckPos: Vector3;
@@ -35,6 +36,7 @@ export class Game {
   public audioEngine: AudioEngine;
   public hotasReceiver: HotasReceiver;
   public touchControls: TouchControls;
+  public multiplayerEngine: MultiplayerEngine;
 
   // Game Objects
   public arena: Arena;
@@ -93,6 +95,23 @@ export class Game {
   private domActiveChassisBadge: HTMLElement | null = null;
   private domActiveTrailBadge: HTMLElement | null = null;
 
+  // Multiplayer 1v1 Networking DOM Elements
+  private domMultiplayerModal: HTMLElement | null = null;
+  private domMultiplayerBtn: HTMLElement | null = null;
+  private domCloseMultiplayerBtn: HTMLElement | null = null;
+  private domConfirmMultiplayerBtn: HTMLElement | null = null;
+  private domCreateRoomBtn: HTMLElement | null = null;
+  private domJoinRoomBtn: HTMLElement | null = null;
+  private domRoomCodeInput: HTMLInputElement | null = null;
+  private domActiveRoomBanner: HTMLElement | null = null;
+  private domActiveRoomCodeDisplay: HTMLElement | null = null;
+  private domNetStatusDot: HTMLElement | null = null;
+  private domNetStatusText: HTMLElement | null = null;
+  private domNetPingText: HTMLElement | null = null;
+  private domDisconnectNetBtn: HTMLElement | null = null;
+  private domMultiplayerBtnLabel: HTMLElement | null = null;
+  private latestGuestInput: GuestInputPacket | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.engine = new Engine(canvas, true, {
@@ -107,6 +126,7 @@ export class Game {
     // Audio & Systems
     this.audioEngine = new AudioEngine();
     this.hotasReceiver = new HotasReceiver('TACHYON-7492');
+    this.multiplayerEngine = new MultiplayerEngine();
 
     // Lights
     const hemiLight = new HemisphericLight('hemiLight', new Vector3(0, 1, 0), this.scene);
@@ -143,6 +163,8 @@ export class Game {
     this.setupInputs();
     this.setupGarageUI();
     this.setupHotasHooks();
+    this.setupMultiplayerHooks();
+    this.setupMultiplayerUI();
     this.setupResize();
 
     // Start Engine Loop
@@ -177,6 +199,22 @@ export class Game {
     this.domConfirmGarageBtn = document.getElementById('confirmGarageBtn');
     this.domActiveChassisBadge = document.getElementById('activeChassisBadge');
     this.domActiveTrailBadge = document.getElementById('activeTrailBadge');
+
+    // Multiplayer
+    this.domMultiplayerModal = document.getElementById('multiplayerModal');
+    this.domMultiplayerBtn = document.getElementById('multiplayerBtn');
+    this.domCloseMultiplayerBtn = document.getElementById('closeMultiplayerBtn');
+    this.domConfirmMultiplayerBtn = document.getElementById('confirmMultiplayerBtn');
+    this.domCreateRoomBtn = document.getElementById('createRoomBtn');
+    this.domJoinRoomBtn = document.getElementById('joinRoomBtn');
+    this.domRoomCodeInput = document.getElementById('roomCodeInput') as HTMLInputElement;
+    this.domActiveRoomBanner = document.getElementById('activeRoomBanner');
+    this.domActiveRoomCodeDisplay = document.getElementById('activeRoomCodeDisplay');
+    this.domNetStatusDot = document.getElementById('netStatusDot');
+    this.domNetStatusText = document.getElementById('netStatusText');
+    this.domNetPingText = document.getElementById('netPingText');
+    this.domDisconnectNetBtn = document.getElementById('disconnectNetBtn');
+    this.domMultiplayerBtnLabel = document.getElementById('multiplayerBtnLabel');
   }
 
   private setupInputs(): void {
@@ -197,6 +235,11 @@ export class Game {
       // Toggle Garage Customization (H or G)
       if (e.code === 'KeyH' || e.code === 'KeyG') {
         this.toggleGarageModal();
+      }
+
+      // Toggle Multiplayer Modal (M)
+      if (e.code === 'KeyM') {
+        this.toggleMultiplayerModal();
       }
 
       // Camera toggle: C or B toggles Ball Cam / Chase Cam
@@ -297,6 +340,7 @@ export class Game {
       const btn = document.getElementById(cfg.id);
       btn?.addEventListener('click', () => {
         this.playerStriker.setChassis(cfg.type);
+        this.aiStriker.setChassis(cfg.type);
         this.audioEngine.playGarageEquip();
 
         if (this.domActiveChassisBadge) {
@@ -329,6 +373,7 @@ export class Game {
       const btn = document.getElementById(cfg.id);
       btn?.addEventListener('click', () => {
         this.playerStriker.setTrail(cfg.type);
+        this.aiStriker.setTrail(cfg.type);
         this.audioEngine.playGarageEquip();
 
         if (this.domActiveTrailBadge) {
@@ -366,6 +411,166 @@ export class Game {
           this.domHotasIndicator.className = 'w-2 h-2 rounded-full bg-amber-500';
           this.domHotasLabel.textContent = 'HOTAS: DISCONNECTED';
         }
+      }
+    });
+  }
+
+  public toggleMultiplayerModal(forceOpen?: boolean): void {
+    if (!this.domMultiplayerModal) return;
+    const shouldOpen = forceOpen !== undefined ? forceOpen : this.domMultiplayerModal.classList.contains('hidden');
+    if (shouldOpen) {
+      this.domMultiplayerModal.classList.remove('hidden');
+    } else {
+      this.domMultiplayerModal.classList.add('hidden');
+    }
+  }
+
+  private setupMultiplayerHooks(): void {
+    this.multiplayerEngine.onConnectionStatus((connected, role, code) => {
+      if (this.domNetStatusDot && this.domNetStatusText) {
+        if (connected) {
+          this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]';
+          this.domNetStatusText.textContent = `ONLINE: ${role} CONNECTED`;
+          if (this.domMultiplayerBtnLabel) {
+            this.domMultiplayerBtnLabel.textContent = `NET: ${role} [${code}]`;
+          }
+          if (this.domActiveRoomBanner && this.domActiveRoomCodeDisplay) {
+            this.domActiveRoomBanner.classList.remove('hidden');
+            this.domActiveRoomCodeDisplay.textContent = code;
+          }
+          this.audioEngine.playGarageEquip();
+        } else {
+          this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+          this.domNetStatusText.textContent = 'SINGLE-PLAYER (OFFLINE AI)';
+          if (this.domMultiplayerBtnLabel) {
+            this.domMultiplayerBtnLabel.textContent = 'MULTIPLAYER [M]';
+          }
+          if (this.domActiveRoomBanner) {
+            this.domActiveRoomBanner.classList.add('hidden');
+          }
+          if (this.domNetPingText) {
+            this.domNetPingText.textContent = '-- ms';
+          }
+        }
+      }
+    });
+
+    this.multiplayerEngine.onGuestInput((packet: GuestInputPacket) => {
+      this.latestGuestInput = packet;
+    });
+
+    this.multiplayerEngine.onHostSync((packet: HostSyncPacket) => {
+      // Reconcile Puck
+      this.puck.position.set(packet.puck.x, packet.puck.y, packet.puck.z);
+      this.puck.velocity.set(packet.puck.vx, packet.puck.vy, packet.puck.vz);
+
+      // Reconcile Host Striker (Cyan)
+      this.playerStriker.position.set(packet.host.x, packet.host.y, packet.host.z);
+      this.playerStriker.velocity.set(packet.host.vx, packet.host.vy, packet.host.vz);
+      this.playerStriker.yaw = packet.host.yaw;
+      this.playerStriker.pitch = packet.host.pitch;
+      this.playerStriker.roll = packet.host.roll;
+      this.playerStriker.boostMeter = packet.host.boost;
+      this.playerStriker.isSupersonic = packet.host.isSupersonic;
+      if (packet.host.chassis) this.playerStriker.setChassis(packet.host.chassis);
+      if (packet.host.trail) this.playerStriker.setTrail(packet.host.trail);
+
+      // Scores and Timer
+      this.scoreCyan = packet.scores.cyan;
+      this.scoreMagenta = packet.scores.magenta;
+      if (this.domScoreCyan) this.domScoreCyan.textContent = this.scoreCyan.toString();
+      if (this.domScoreMagenta) this.domScoreMagenta.textContent = this.scoreMagenta.toString();
+      this.matchSecondsRemaining = packet.matchTimer;
+
+      // Goal shockwave trigger
+      if (packet.goalDetonated && !this.isGoalFreeze) {
+        this.isGoalFreeze = true;
+        this.goalFreezeTimer = 1.2;
+      }
+    });
+  }
+
+  private setupMultiplayerUI(): void {
+    this.domMultiplayerBtn?.addEventListener('click', () => {
+      this.toggleMultiplayerModal();
+    });
+
+    this.domCloseMultiplayerBtn?.addEventListener('click', () => {
+      this.toggleMultiplayerModal(false);
+    });
+
+    this.domConfirmMultiplayerBtn?.addEventListener('click', () => {
+      this.toggleMultiplayerModal(false);
+    });
+
+    this.domCreateRoomBtn?.addEventListener('click', async () => {
+      if (this.domNetStatusText) {
+        this.domNetStatusText.textContent = 'HOSTING: INITIALIZING WEBRTC...';
+      }
+      try {
+        const code = await this.multiplayerEngine.hostMatch();
+        if (this.domActiveRoomBanner && this.domActiveRoomCodeDisplay) {
+          this.domActiveRoomBanner.classList.remove('hidden');
+          this.domActiveRoomCodeDisplay.textContent = code;
+        }
+        if (this.domNetStatusText) {
+          this.domNetStatusText.textContent = `HOSTING ROOM [${code}]: WAITING FOR RIVAL...`;
+        }
+        if (this.domNetStatusDot) {
+          this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping';
+        }
+        if (this.domMultiplayerBtnLabel) {
+          this.domMultiplayerBtnLabel.textContent = `HOST [${code}]`;
+        }
+      } catch (err) {
+        console.error('Failed to host match:', err);
+        if (this.domNetStatusText) {
+          this.domNetStatusText.textContent = 'FAILED TO HOST ROOM (CHECK STUN/PEER)';
+        }
+      }
+    });
+
+    this.domJoinRoomBtn?.addEventListener('click', async () => {
+      const code = this.domRoomCodeInput?.value.trim().toUpperCase();
+      if (!code) {
+        alert('Please enter a 4 to 8 character Room Code.');
+        return;
+      }
+
+      if (this.domNetStatusText) {
+        this.domNetStatusText.textContent = `JOINING ROOM [${code}]...`;
+      }
+      if (this.domNetStatusDot) {
+        this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-fuchsia-400 animate-ping';
+      }
+
+      const success = await this.multiplayerEngine.joinMatch(code);
+      if (!success) {
+        if (this.domNetStatusText) {
+          this.domNetStatusText.textContent = `FAILED TO JOIN [${code}] (ROOM NOT FOUND)`;
+        }
+        if (this.domNetStatusDot) {
+          this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+        }
+      }
+    });
+
+    this.domDisconnectNetBtn?.addEventListener('click', () => {
+      this.multiplayerEngine.disconnect();
+      if (this.domNetStatusText) {
+        this.domNetStatusText.textContent = 'SINGLE-PLAYER (OFFLINE AI)';
+      }
+      if (this.domNetStatusDot) {
+        this.domNetStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+      }
+      if (this.domActiveRoomBanner) {
+        this.domActiveRoomBanner.classList.add('hidden');
+      }
+      if (this.domMultiplayerBtnLabel) {
+        this.domMultiplayerBtnLabel.textContent = 'MULTIPLAYER [M]';
+      }
+      if (this.domNetPingText) {
+        this.domNetPingText.textContent = '-- ms';
       }
     });
   }
@@ -428,45 +633,154 @@ export class Game {
       this.domMatchTimer.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
-    // 1. Gather Player Inputs
+    const isGuest = this.multiplayerEngine.isConnected && this.multiplayerEngine.role === 'GUEST';
+    const isHost = this.multiplayerEngine.isConnected && this.multiplayerEngine.role === 'HOST';
+
+    // 1. Gather Local Player Inputs
     const playerInputs = this.getPlayerInputs();
 
-    // 2. Gather AI Inputs
-    const aiInputs = this.getAiInputs(dt);
-
-    // 3. Update Arena Boost Pads
+    // 2. Update Arena Boost Pads
     this.arena.update(dt);
-
-    // Check Boost Pickups
-    const playerBoostGained = this.arena.checkBoostPickups(this.playerStriker.position);
-    if (playerBoostGained > 0) this.playerStriker.addBoost(playerBoostGained);
-
-    const aiBoostGained = this.arena.checkBoostPickups(this.aiStriker.position);
-    if (aiBoostGained > 0) this.aiStriker.addBoost(aiBoostGained);
-
-    // 4. Update Strikers
     const bounds = { width: this.arena.width, length: this.arena.length, wallHeight: this.arena.wallHeight };
-    this.playerStriker.update(dt, playerInputs, bounds);
-    this.aiStriker.update(dt, aiInputs, bounds);
 
-    // 5. Check Striker-on-Striker Collisions & Supersonic Demolitions
-    this.checkVehicleCollisions();
+    if (isGuest) {
+      // --- GUEST SIMULATION LOOP ---
+      // Local client controls Magenta Striker with zero latency
+      this.aiStriker.update(dt, playerInputs, bounds);
 
-    // 6. Update Energy Ball & Check Goals
-    const goalResult = this.puck.update(dt, this.arena, [this.playerStriker, this.aiStriker]);
+      const guestBoost = this.arena.checkBoostPickups(this.aiStriker.position);
+      if (guestBoost > 0) this.aiStriker.addBoost(guestBoost);
 
-    if (goalResult === 'cyan_scores') {
-      this.scoreCyan++;
-      this.onGoal('cyan');
-    } else if (goalResult === 'magenta_scores') {
-      this.scoreMagenta++;
-      this.onGoal('magenta');
+      // Transmit Guest Telemetry & Inputs to Host (60 Hz)
+      this.multiplayerEngine.send({
+        type: 'INPUT',
+        timestamp: performance.now(),
+        throttle: playerInputs.throttle,
+        steer: playerInputs.steer,
+        boost: playerInputs.boost,
+        jump: playerInputs.jump,
+        pulse: playerInputs.pulse,
+        airRollLeft: playerInputs.airRollLeft,
+        airRollRight: playerInputs.airRollRight,
+        pos: { x: this.aiStriker.position.x, y: this.aiStriker.position.y, z: this.aiStriker.position.z },
+        rot: { yaw: this.aiStriker.yaw, pitch: this.aiStriker.pitch, roll: this.aiStriker.roll },
+        vel: { vx: this.aiStriker.velocity.x, vy: this.aiStriker.velocity.y, vz: this.aiStriker.velocity.z },
+        boostMeter: this.aiStriker.boostMeter,
+        chassis: this.aiStriker.getChassis(),
+        trail: this.aiStriker.getTrail(),
+        isSupersonic: this.aiStriker.isSupersonic
+      });
+
+      // Puck and Host vehicle (Cyan) are updated authoritatively via onHostSync callback
+    } else if (isHost) {
+      // --- HOST AUTHORITATIVE SIMULATION LOOP ---
+      // Host controls Cyan Striker
+      this.playerStriker.update(dt, playerInputs, bounds);
+
+      // Drive Guest vehicle via latest input packet or fallback to AI
+      if (this.latestGuestInput) {
+        const guestInputs: StrikerInputs = {
+          throttle: this.latestGuestInput.throttle,
+          steer: this.latestGuestInput.steer,
+          boost: this.latestGuestInput.boost,
+          jump: this.latestGuestInput.jump,
+          pulse: this.latestGuestInput.pulse,
+          airRollLeft: this.latestGuestInput.airRollLeft,
+          airRollRight: this.latestGuestInput.airRollRight,
+        };
+        this.aiStriker.update(dt, guestInputs, bounds);
+
+        // Smooth position correction toward guest reported state
+        const gPos = this.latestGuestInput.pos;
+        if (gPos) {
+          this.aiStriker.position.x += (gPos.x - this.aiStriker.position.x) * 0.4;
+          this.aiStriker.position.y += (gPos.y - this.aiStriker.position.y) * 0.4;
+          this.aiStriker.position.z += (gPos.z - this.aiStriker.position.z) * 0.4;
+        }
+        if (this.latestGuestInput.chassis) this.aiStriker.setChassis(this.latestGuestInput.chassis);
+        if (this.latestGuestInput.trail) this.aiStriker.setTrail(this.latestGuestInput.trail);
+      } else {
+        const aiInputs = this.getAiInputs(dt);
+        this.aiStriker.update(dt, aiInputs, bounds);
+      }
+
+      // Check Boost Pickups
+      const playerBoostGained = this.arena.checkBoostPickups(this.playerStriker.position);
+      if (playerBoostGained > 0) this.playerStriker.addBoost(playerBoostGained);
+
+      const aiBoostGained = this.arena.checkBoostPickups(this.aiStriker.position);
+      if (aiBoostGained > 0) this.aiStriker.addBoost(aiBoostGained);
+
+      // Striker-on-Striker Collisions & Demolitions
+      this.checkVehicleCollisions();
+
+      // Energy Ball & Goal Detection
+      const goalResult = this.puck.update(dt, this.arena, [this.playerStriker, this.aiStriker]);
+      if (goalResult === 'cyan_scores') {
+        this.scoreCyan++;
+        this.onGoal('cyan');
+      } else if (goalResult === 'magenta_scores') {
+        this.scoreMagenta++;
+        this.onGoal('magenta');
+      }
+
+      // Broadcast Host Authoritative State to Guest (60 Hz)
+      this.multiplayerEngine.send({
+        type: 'SYNC',
+        timestamp: performance.now(),
+        puck: {
+          x: this.puck.position.x,
+          y: this.puck.position.y,
+          z: this.puck.position.z,
+          vx: this.puck.velocity.x,
+          vy: this.puck.velocity.y,
+          vz: this.puck.velocity.z,
+        },
+        host: {
+          x: this.playerStriker.position.x,
+          y: this.playerStriker.position.y,
+          z: this.playerStriker.position.z,
+          yaw: this.playerStriker.yaw,
+          pitch: this.playerStriker.pitch,
+          roll: this.playerStriker.roll,
+          vx: this.playerStriker.velocity.x,
+          vy: this.playerStriker.velocity.y,
+          vz: this.playerStriker.velocity.z,
+          boost: this.playerStriker.boostMeter,
+          chassis: this.playerStriker.getChassis(),
+          trail: this.playerStriker.getTrail(),
+          isSupersonic: this.playerStriker.isSupersonic,
+        },
+        scores: { cyan: this.scoreCyan, magenta: this.scoreMagenta },
+        matchTimer: this.matchSecondsRemaining,
+        goalDetonated: this.isGoalFreeze,
+      });
+    } else {
+      // --- OFFLINE SINGLE-PLAYER SIMULATION ---
+      this.playerStriker.update(dt, playerInputs, bounds);
+      const aiInputs = this.getAiInputs(dt);
+      this.aiStriker.update(dt, aiInputs, bounds);
+
+      const playerBoostGained = this.arena.checkBoostPickups(this.playerStriker.position);
+      if (playerBoostGained > 0) this.playerStriker.addBoost(playerBoostGained);
+
+      const aiBoostGained = this.arena.checkBoostPickups(this.aiStriker.position);
+      if (aiBoostGained > 0) this.aiStriker.addBoost(aiBoostGained);
+
+      this.checkVehicleCollisions();
+
+      const goalResult = this.puck.update(dt, this.arena, [this.playerStriker, this.aiStriker]);
+      if (goalResult === 'cyan_scores') {
+        this.scoreCyan++;
+        this.onGoal('cyan');
+      } else if (goalResult === 'magenta_scores') {
+        this.scoreMagenta++;
+        this.onGoal('magenta');
+      }
     }
 
-    // 7. Update Dynamic Camera
+    // Dynamic Camera & HUD
     this.updateCamera(dt);
-
-    // 8. Update HUD
     this.updateHud();
   }
 
@@ -606,12 +920,14 @@ export class Game {
   private updateCamera(dt: number): void {
     if (this.activeCamMode === 'drone') return;
 
-    const shipPos = this.playerStriker.position;
-    const shipYaw = this.playerStriker.yaw;
+    const isGuest = this.multiplayerEngine.isConnected && this.multiplayerEngine.role === 'GUEST';
+    const activeShip = isGuest ? this.aiStriker : this.playerStriker;
+    const shipPos = activeShip.position;
+    const shipYaw = activeShip.yaw;
     const ballPos = this.puck.position;
 
     // Dynamic Velocity Warp & Camera Pullback
-    const currentSpeed = this.playerStriker.velocity.length();
+    const currentSpeed = activeShip.velocity.length();
     const speedRatio = Math.min(1.0, currentSpeed / 85);
 
     // Dynamic FOV: 0.82 rad (~47 deg) expanding to 1.18 rad (~68 deg) at hypersonic afterburner
@@ -650,7 +966,7 @@ export class Game {
     }
 
     // Hypersonic / Supersonic Airframe Micro-vibration
-    if (this.playerStriker.isSupersonic) {
+    if (activeShip.isSupersonic) {
       const shakeIntensity = 0.12 * speedRatio;
       this.chaseCamera.position.x += (Math.random() - 0.5) * shakeIntensity;
       this.chaseCamera.position.y += (Math.random() - 0.5) * shakeIntensity * 0.7;
@@ -794,14 +1110,16 @@ export class Game {
   }
 
   private updateHud(): void {
-    const speed = this.playerStriker.getSpeedKmH();
+    const isGuest = this.multiplayerEngine.isConnected && this.multiplayerEngine.role === 'GUEST';
+    const activeShip = isGuest ? this.aiStriker : this.playerStriker;
+    const speed = activeShip.getSpeedKmH();
 
     if (this.domSpeedValue) {
       this.domSpeedValue.textContent = speed.toString().padStart(3, '0');
       if (speed >= 210) {
         // Hypersonic Tier (>210 km/h)
         this.domSpeedValue.className = 'text-3xl font-black font-mono text-[#FFE600] leading-none animate-pulse drop-shadow-[0_0_20px_#FFE600]';
-      } else if (this.playerStriker.isSupersonic) {
+      } else if (activeShip.isSupersonic) {
         // Supersonic Tier
         this.domSpeedValue.className = 'text-3xl font-black font-mono text-[#00F3FF] leading-none animate-pulse drop-shadow-[0_0_15px_#00F3FF]';
       } else {
@@ -813,7 +1131,7 @@ export class Game {
       if (speed >= 210) {
         this.domSpeedTier.textContent = 'HYPERSONIC';
         this.domSpeedTier.className = 'text-[9px] font-mono font-bold text-amber-300 tracking-wider animate-pulse';
-      } else if (this.playerStriker.isSupersonic) {
+      } else if (activeShip.isSupersonic) {
         this.domSpeedTier.textContent = 'SUPERSONIC';
         this.domSpeedTier.className = 'text-[9px] font-mono font-bold text-[#00F3FF] tracking-wider';
       } else {
@@ -829,19 +1147,30 @@ export class Game {
     }
 
     if (this.domBoostPercent && this.domBoostBar) {
-      const pct = Math.round(this.playerStriker.boostMeter);
+      const pct = Math.round(activeShip.boostMeter);
       this.domBoostPercent.textContent = `${pct}%`;
       this.domBoostBar.style.width = `${pct}%`;
     }
 
     if (this.domPulseStatus) {
-      if (this.playerStriker.pulseCooldown <= 0) {
+      if (activeShip.pulseCooldown <= 0) {
         this.domPulseStatus.textContent = 'READY';
         this.domPulseStatus.className = 'text-xs font-mono font-bold text-cyan-400 mt-1 px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/40 shadow-[0_0_8px_rgba(0,243,255,0.4)]';
       } else {
-        const cd = this.playerStriker.pulseCooldown.toFixed(1);
+        const cd = activeShip.pulseCooldown.toFixed(1);
         this.domPulseStatus.textContent = `${cd}S`;
         this.domPulseStatus.className = 'text-xs font-mono font-bold text-slate-500 mt-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-800';
+      }
+    }
+
+    // Ping telemetry
+    if (this.domNetPingText) {
+      if (this.multiplayerEngine.isConnected) {
+        this.domNetPingText.textContent = `${this.multiplayerEngine.pingMs} ms`;
+        this.domNetPingText.className = this.multiplayerEngine.pingMs < 80 ? 'text-emerald-400 font-mono text-xs' : 'text-amber-400 font-mono text-xs';
+      } else {
+        this.domNetPingText.textContent = '-- ms';
+        this.domNetPingText.className = 'text-slate-500 font-mono text-xs';
       }
     }
   }

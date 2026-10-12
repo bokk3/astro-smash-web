@@ -73,6 +73,10 @@
             <span>🛠️</span>
             <span>GARAGE [H]</span>
           </button>
+          <button id="multiplayerBtn" class="bg-black/75 hover:bg-slate-900 border border-cyan-500/40 hover:border-cyan-400 px-3 py-1.5 rounded-xl text-xs font-mono text-cyan-300 flex items-center gap-1.5 transition-all shadow-[0_0_15px_rgba(0,243,255,0.2)] cursor-pointer">
+            <span>🌐</span>
+            <span id="multiplayerBtnLabel">MULTIPLAYER [M]</span>
+          </button>
         </div>
       </header>
 
@@ -294,6 +298,77 @@
         <button id="confirmGarageBtn" class="w-full py-3.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-cyan-400 hover:from-cyan-400 hover:to-blue-500 text-black font-black uppercase tracking-widest rounded-xl transition-all shadow-[0_0_25px_rgba(0,243,255,0.4)] cursor-pointer">
           Equip & Deploy Striker
         </button>
+      </div>
+    </div>
+
+    <!-- Real-Time WebRTC P2P Multiplayer 1v1 Modal -->
+    <div id="multiplayerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md pointer-events-auto">
+      <div class="relative w-full max-w-lg bg-[#0d0f15]/95 border border-cyan-500/40 rounded-3xl p-6 md:p-8 shadow-[0_0_60px_rgba(0,243,255,0.2)]">
+        
+        <!-- Header -->
+        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">🌐</span>
+            <div>
+              <h2 class="text-xl font-bold tracking-wider uppercase text-cyan-400">P2P Arena Matchmaking</h2>
+              <p class="text-xs font-mono text-slate-400">Low-Latency WebRTC DataChannel 1v1</p>
+            </div>
+          </div>
+          <button id="closeMultiplayerBtn" class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800/60 transition-all font-mono">✕</button>
+        </div>
+
+        <!-- Connection Status Display -->
+        <div class="my-4 p-3 rounded-2xl bg-black/60 border border-slate-800 flex items-center justify-between font-mono text-xs">
+          <div class="flex items-center gap-2">
+            <span id="netStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+            <span id="netStatusText" class="text-slate-300">SINGLE-PLAYER (OFFLINE AI)</span>
+          </div>
+          <span id="netPingText" class="text-slate-500">-- ms</span>
+        </div>
+
+        <!-- Host or Join Tabs / Actions -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 my-5">
+          <!-- Host Box -->
+          <div class="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 flex flex-col justify-between">
+            <div>
+              <div class="text-xs font-mono text-cyan-400 font-bold uppercase mb-1">Host 1v1 Match</div>
+              <p class="text-[11px] text-slate-400 mb-3">Generate a room code and invite an opponent.</p>
+            </div>
+            <button id="createRoomBtn" class="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold font-mono text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(0,243,255,0.4)] cursor-pointer">
+              Create Room
+            </button>
+          </div>
+
+          <!-- Join Box -->
+          <div class="p-4 rounded-2xl bg-fuchsia-950/20 border border-fuchsia-500/30 flex flex-col justify-between">
+            <div>
+              <div class="text-xs font-mono text-fuchsia-400 font-bold uppercase mb-1">Join By Code</div>
+              <input id="roomCodeInput" type="text" maxlength="8" placeholder="e.g. APEX42" class="w-full px-3 py-2 rounded-xl bg-black/80 border border-slate-700 text-white font-mono text-sm uppercase tracking-widest text-center focus:border-fuchsia-400 outline-none mb-3" />
+            </div>
+            <button id="joinRoomBtn" class="w-full py-2.5 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold font-mono text-xs uppercase tracking-wider transition-all shadow-[0_0_15px_rgba(255,0,255,0.4)] cursor-pointer">
+              Join Room
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Room Code Banner (Shown when hosting/joined) -->
+        <div id="activeRoomBanner" class="hidden p-4 rounded-2xl bg-cyan-500/10 border border-cyan-400/40 text-center mb-4">
+          <div class="text-[11px] font-mono text-cyan-300 uppercase tracking-widest mb-1">Active Room Code</div>
+          <div id="activeRoomCodeDisplay" class="text-3xl font-black font-mono tracking-widest text-white drop-shadow-[0_0_10px_rgba(0,243,255,0.8)]">
+            ----
+          </div>
+          <div class="text-[10px] text-slate-400 font-mono mt-1">Share this code with your rival to connect directly!</div>
+        </div>
+
+        <!-- Footer -->
+        <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+          <button id="disconnectNetBtn" class="px-4 py-2 rounded-xl bg-slate-800/80 hover:bg-red-950 hover:text-red-300 text-slate-400 font-mono text-xs uppercase transition-all cursor-pointer">
+            Disconnect / Reset
+          </button>
+          <button id="confirmMultiplayerBtn" class="px-5 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-mono text-xs uppercase font-bold transition-all cursor-pointer">
+            Close
+          </button>
+        </div>
       </div>
     </div>
 

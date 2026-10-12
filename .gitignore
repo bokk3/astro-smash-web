@@ -4,6 +4,7 @@ dist/
 dist-ssr/
 *.local
 *.tsbuildinfo
+.wrangler/
 
 # Logs
 npm-debug.log*

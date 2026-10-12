@@ -191,6 +191,14 @@ export class Striker {
     }
   }
 
+  public getChassis(): ChassisType {
+    return this.currentChassis;
+  }
+
+  public getTrail(): TrailCosmetic {
+    return this.currentTrail;
+  }
+
   private buildInterceptorGeometry(parent: Mesh): void {
     const bodyMat = new StandardMaterial(`ship_body_${this.team}_interceptor`, this.scene);
     bodyMat.diffuseColor = new Color3(0.08, 0.09, 0.12);
